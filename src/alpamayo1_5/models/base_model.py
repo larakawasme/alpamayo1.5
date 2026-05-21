@@ -246,7 +246,10 @@ class ReasoningVLAConfig(PretrainedConfig):
         """Initialize VLM-specific configuration based on backend type."""
         if self.vlm_name_or_path is None:
             return
-
+        #if no local path just skip (work around when running jupyter on cc)
+        import os
+        if not os.path.exists(self.vlm_name_or_path):
+            return
         processor = self._build_processor()
         self.vocab_size = len(processor.tokenizer)
         self.traj_token_start_idx = processor.tokenizer.traj_token_start_idx
