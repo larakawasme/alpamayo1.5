@@ -188,7 +188,7 @@ class FlowMatching(BaseDiffusion):
                 )
             else:
                 v = step_fn(x=x, t=t_start)
-            x = x + dt * v
+            x = x + dt.to(x.device) * v.to(x.device)
             if return_all_steps:
                 all_steps.append(x)
         if return_all_steps:
