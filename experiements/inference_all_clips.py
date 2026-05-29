@@ -1,12 +1,26 @@
 import numpy as np
 import mediapy as mp
 import pandas as pd
+import modelopt.torch.quantization as mtq
+from accelerate import dispatch_model, infer_auto_device_map
 
 import torch
 from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
 from alpamayo1_5.load_physical_aiavdataset import load_physical_aiavdataset
 from alpamayo1_5 import helper
 import matplotlib.pyplot as plt
+MAX_CLIPS = 51
+QUANT_CFG_CHOICES = {
+    "nvfp4":              mtq.NVFP4_DEFAULT_CFG,
+    "nvfp4_mlp_only":     mtq.NVFP4_MLP_ONLY_CFG,
+    "nvfp4_experts_only": mtq.NVFP4_EXPERTS_ONLY_CFG,
+    "nvfp4_omlp_only":    mtq.NVFP4_OMLP_ONLY_CFG,
+    "fp8":                mtq.FP8_DEFAULT_CFG,
+    "int8":               mtq.INT8_DEFAULT_CFG,
+    "int8_sq":            mtq.INT8_SMOOTHQUANT_CFG,
+    "int4_awq":           mtq.INT4_AWQ_CFG,
+    "w4a8_awq":           mtq.W4A8_AWQ_BETA_CFG,
+}
 
 def plot_clip(clip_id, label, pred_xyz, gt_xy, min_ade, parquet_index):
     """Plot predicted trajectories vs ground truth for a single clip."""
@@ -19,7 +33,7 @@ def plot_clip(clip_id, label, pred_xyz, gt_xy, min_ade, parquet_index):
     plt.ylabel("y (m)")
     plt.title(f"{label} | parquet_index{parquet_index} | minADE: {min_ade:.4f}m")
     plt.legend(loc="best")
-    plt.axis("equal")
+    plt.axis("equal")   
     plt.savefig(f"{label.lower()}_trajectory.png")
     plt.close()
     print(f"{label} trajectory saved.")
@@ -31,6 +45,25 @@ def load_model():
     processor = helper.get_processor(model.tokenizer)
     return model, processor
 
+
+def load_quantized_model(path, quant_cfg_name):
+    model = Alpamayo1_5.from_pretrained(
+        "nvidia/Alpamayo-1.5-10B", 
+        dtype=torch.bfloat16, 
+        device_map="auto",
+        max_memory={0: "12GiB", 1: "12GiB"}
+    )
+    model.tie_weights()
+    # restore quantization structure first
+    quant_cfg = QUANT_CFG_CHOICES[quant_cfg_name]
+    mtq.quantize(model, quant_cfg, forward_loop=lambda m: None)
+
+    state_dict = torch.load(path, map_location="cpu", weights_only=True)
+    model.load_state_dict(state_dict, strict=False)
+    model.tie_weights()
+
+    processor = helper.get_processor(model.tokenizer)
+    return model, processor
 
 def run_inference(clip_id, model, processor):
     """Load a clip and run model inference. Returns pred_xyz, gt_xy, extra."""
@@ -83,7 +116,6 @@ def minADE_across_all_clips(model, processor):
     results = []
     for idx, clip_id in enumerate(clip_ids):
         print(f"\n[{idx+1}/{len(clip_ids)}] Processing clip: {clip_id}")
-
         pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
         min_ade = compute_min_ade(pred_xyz, gt_xy)
         results.append({"clip_id": clip_id,
@@ -106,7 +138,7 @@ def minADE_across_all_clips(model, processor):
     counts, __ , __ = plt.hist(min_ade_df, bins="auto")
     num_bins = len(counts)
     print(f"Number of bins chosen: {num_bins}")
-    
+
     plt.xlabel("minADE (m)")
     plt.ylabel("Number of clips")
     plt.title("minADE distribution across dataset")
@@ -124,5 +156,6 @@ def minADE_across_all_clips(model, processor):
         plot_clip(row["clip_id"], label, pred_xyz, gt_xy, row["minADE"], row["parquet_index"])
 
 if __name__ == '__main__':
-    model, processor = load_model()
+    #model, processor = load_model()
+    model, processor = load_quantized_model("quantized_models/alpamayo1_5_nvfp4.pt", "nvfp4")    
     minADE_across_all_clips(model, processor)
