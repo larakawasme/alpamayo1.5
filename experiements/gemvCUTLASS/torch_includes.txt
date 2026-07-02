@@ -1,0 +1,1 @@
+-I/home/lara/alpamayo1.5/a1_5_venv/lib/python3.12/site-packages/torch/include -I/home/lara/alpamayo1.5/a1_5_venv/lib/python3.12/site-packages/torch/include/torch/csrc/api/include
