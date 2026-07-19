@@ -1,0 +1,16 @@
+# ignore everything in this directory
+*
+
+# except these
+!.gitignore
+!./gemvCUTLASS
+!compare_minade.py
+!compare_sparse_runs.py
+!harness.cu
+!gemv_custom.h
+!notes.md
+!inference_all_clips.py
+!plot_data_set_results.py
+!quantize_model*
+!0417_16*
+!clearer_sparse_runs_comparison.py

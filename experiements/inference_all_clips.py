@@ -1,8 +1,8 @@
 import numpy as np
-import mediapy as mp
 import pandas as pd
 import modelopt.torch.quantization as mtq
 from accelerate import dispatch_model, infer_auto_device_map
+import modelopt.torch.opt as mto
 
 import torch
 import torch_tensorrt
@@ -42,74 +42,102 @@ from functools import lru_cache
 
 _orig_linear_forward = nn.Linear.forward
 gemv_count = 0
+keep_ratio = 1
 
 #WORKED FOR SPARSITY!
-# def _patched_linear_forward(self, x):
-#     global gemv_count
-#     is_gemv = x.shape[-2] == 1 if x.dim() >= 2 else False
-#     if is_gemv:
-#         gemv_count +=1
-#         num_zeros = (x == 0).sum().item()
-#         total = x.numel()
-#         #print(f"*** GEMV *** Linear({self.in_features}, {self.out_features}) input tensor shape: {x.shape} dtype: {x.dtype}")
-#         #print(f"zeros before: {num_zeros}/{total} ({100*num_zeros/total:.2f}%)")
-
-#         keep_ratio = 0.8
-#         k = int(x.numel() * keep_ratio)
-#         threshold = x.abs().flatten().topk(k).values[-1]
-#         x = x * (x.abs() >= threshold)
-#         num_zeros_after = (x == 0).sum().item()
-#         #print(f"zeros after: {num_zeros_after}/{total} ({100*num_zeros_after/total:.2f}%)")
-
-#         #print(f"tensor:\n{x}")
-#         #traceback.print_stack(limit=100)
-
-#     return _orig_linear_forward(self, x)
-
-# nn.Linear.forward = _patched_linear_forward
-
-#WIP FOR CUTLASS
 def _patched_linear_forward(self, x):
     global gemv_count
     is_gemv = x.shape[-2] == 1 if x.dim() >= 2 else False
+    if is_gemv:
+        # Magnitude before sparsification - suggestionf from ningfeng
+        mag_before = x.norm()
 
-    if is_gemv and self.weight.is_contiguous():
-        # check K is divisible by 4 (CUTLASS requirement)
-        K = self.weight.size(1)
-        if K % 4 == 0:
-            gemv_count += 1
+        gemv_count +=1
+        #num_zeros = (x == 0).sum().item()
+        total = x.numel()
+        # weight matrix has shape out by in shape. linear layer computes x @ W.T so x is 1 by in shape and W.T is in by outshape
+        #print(f"*** GEMV *** Linear({self.in_features}, {self.out_features}) input tensor shape: {x.shape} dtype: {x.dtype}")
 
-            # your existing sparsification
-            keep_ratio = 0.6
-            k = int(x.numel() * keep_ratio)
-            threshold = x.abs().flatten().topk(k).values[-1]
-            x = x * (x.abs() >= threshold)
+        k = int(x.numel() * keep_ratio)
+        threshold = x.abs().flatten().topk(k).values[-1]
+        # Sparsify
+        x = x * (x.abs() >= threshold)
 
-            # CUTLASS kernel only supports float32 — cast in, cast out
-            x_f32 = x.float()
-            weight_f32 = self.weight.float()
+        # Magnitude after sparsification - suggestion from ningfeng
+        mag_after = x.norm()
+        # Rescale remaining zeros values
 
-            # CUTLASS kernel
-            x_sq = x_f32.squeeze(-2)                 # [..., K]
+        x = x * (mag_before / mag_after) #NOTE UNCOMMENT THIS
 
-            # ← set CUDA context to the tensor's actual device before launching
-            with torch.cuda.device(weight_f32.device):
-                y = gemv_ext.gemv(weight_f32, x_sq)# [..., M]
-                
-            
-            y = y.unsqueeze(-2)                  # [..., 1, M]
+        #num_zeros_after = (x == 0).sum().item()
 
-            if self.bias is not None:
-                y = y + self.bias
+        if gemv_count == 1:
+            W = self.weight
 
-            return y
+            print("\n===== FIRST GEMV LAYER =====")
+            print("Layer:", self)
+            print("Weight shape:", W.shape)
+            print("Weight dtype:", W.dtype)
+            print("Weight device:", W.device)
+            print("Weight stride:", W.stride())
+            print("Weight contiguous:", W.is_contiguous())
+            print("Weight storage offset:", W.storage_offset())
+            print("Weight data pointer:", W.data_ptr())
+
+            print("Expected row-major stride:",
+                  (W.shape[1], 1))
+
+            print("============================\n")
+
+        #     traceback.print_stack(limit=100)
+            #print(f"zeros before: {num_zeros}/{total} ({100*num_zeros/total:.2f}%)")
+            print(f"multiplying by magnitudes: debugging first vector found. mag before = {mag_before}, mag after = {mag_after}")
+            #print(f"zeros after: {num_zeros_after}/{total} ({100*num_zeros_after/total:.2f}%)")
 
     return _orig_linear_forward(self, x)
 
 nn.Linear.forward = _patched_linear_forward
 
+#WIP FOR CUTLASS
+# def _patched_linear_forward(self, x):
+#     global gemv_count
+#     is_gemv = x.shape[-2] == 1 if x.dim() >= 2 else False
 
-def plot_clip(clip_id, label, pred_xyz, gt_xy, min_ade, parquet_index):
+#     if is_gemv and self.weight.is_contiguous(): # must be contiguous to meet layout requirment
+#         #check K is divisible by 4 (CUTLASS requirement)
+#         K = self.weight.size(1)
+#         if K % 8 == 0: # kernel grabs 128 bits per load, 128/16 = 8
+#             gemv_count += 1
+
+#             #your existing sparsification
+#             keep_ratio = 0.15 #keep 15%, therfore 75% sparsity
+#             k = int(x.numel() * keep_ratio)
+#             threshold = x.abs().flatten().topk(k).values[-1]
+#             x = x * (x.abs() >= threshold)
+
+#             #CUTLASS kernel only supports float32 — cast in, cast out
+#             x_f32 = x.float()
+#             weight_f32 = self.weight.float()
+
+#             #CUTLASS kernel
+#             x_sq = x_f32.squeeze(-2)                 # [..., K]
+
+#             #← set CUDA context to the tensor's actual device before launching
+#             with torch.cuda.device(weight_f32.device):
+#                 y = gemv_ext.gemv(weight_f32, x_sq)# [..., M]
+                
+            
+#             y = y.unsqueeze(-2)                  # [..., 1, M]
+
+#             if self.bias is not None:
+#                 y = y + self.bias
+
+#             return y
+
+#     return _orig_linear_forward(self, x)
+
+
+def plot_clip(clip_id, label, pred_xyz, gt_xy, min_ade, parquet_index, out_dir):
     """Plot predicted trajectories vs ground truth for a single clip."""
     plt.figure()
     for i in range(pred_xyz.shape[2]):
@@ -118,17 +146,73 @@ def plot_clip(clip_id, label, pred_xyz, gt_xy, min_ade, parquet_index):
     plt.plot(gt_xy[0], gt_xy[1], "r-", label="Ground Truth")
     plt.xlabel("x (m)")
     plt.ylabel("y (m)")
-    plt.title(f"{label} | parquet_index{parquet_index} | minADE: {min_ade:.4f}m")
+    plt.title(f"{label} | parquet_index{parquet_index} | ADE: {min_ade:.4f}m")
     plt.legend(loc="best")
     plt.axis("equal")   
-    plt.savefig(f"{label.lower()}_trajectory.png")
+    plt.savefig(os.path.join(out_dir, f"{label.lower()}_trajectory_keep{keep_ratio}.png"))
     plt.close()
     print(f"{label} trajectory saved.")
 
 
-def load_model():
-    model = Alpamayo1_5.from_pretrained("nvidia/Alpamayo-1.5-10B", dtype=torch.bfloat16, device_map="auto")
-    model.tie_weights()
+def load_model(quantization=""):
+    if not quantization:
+        model = Alpamayo1_5.from_pretrained(
+                            "nvidia/Alpamayo-1.5-10B",
+                            dtype=torch.bfloat16, 
+                            device_map="auto",
+                            attn_implementation="eager"
+        )
+        model.tie_weights()  
+        model = torch.compile(model, backend="torch_tensorrt")
+
+    elif quantization == "nvfp4":
+        mto.enable_huggingface_checkpointing()          
+        model = Alpamayo1_5.from_pretrained(
+                        "./alpamayo-nvfp4-fake-quant",
+                        device_map="cpu",   
+                        dtype="auto",
+                        attn_implementation="eager"
+        )
+        model.tie_weights()
+        mtq.compress(model)
+        model.to("cuda:0")
+        model = torch.compile(model, backend="torch_tensorrt")
+    else:
+        raise ValueError(f"Unknown quantization type: {quantization}")
+    
+    model.eval()
+
+    print("\n===== debug stuff =====")
+
+    if quantization:
+        # 1. did compress actually pack? (expect ~1000, uint8, halved last dim)
+        packed = [n for n, p in model.state_dict().items()
+                if p.dtype in (torch.uint8, torch.float8_e4m3fn)]
+        m = next(mod for n, mod in model.named_modules()
+                if "vlm" in n and "down_proj" in n)
+        print(f"[load_model] {len(packed)} packed tensors | "
+            f"specimen: {type(m).__name__} {m.weight.dtype} {tuple(m.weight.shape)}")
+        assert packed, "no packed tensors — compress didn't run"
+
+        # 2. did calibration state load, and is it sane?
+        amax_mods = [(n, mod) for n, mod in model.named_modules()
+                    if getattr(mod, "_amax", None) is not None]
+        bad = [n for n, mod in amax_mods if not torch.isfinite(mod._amax).all()]
+        print(f"[load_model] {len(amax_mods)} calibrated quantizers, {len(bad)} non-finite")
+        assert amax_mods and not bad, "calibration state missing or corrupt"
+
+    # ── sanity checks (only for quantized load) ──
+    if quantization:
+        n = sum(1 for _, m in model.named_modules()
+                if getattr(m, "_amax", None) is not None)
+        print(f"[load_model] {n} quantizers with loaded _amax")
+
+        bad = [name for name, m in model.named_modules()
+               if getattr(m, "_amax", None) is not None
+               and not torch.isfinite(m._amax).all()]
+        print(f"[load_model] {len(bad)} quantizers with non-finite _amax")
+
+
     processor = helper.get_processor(model.tokenizer)
     return model, processor
 
@@ -181,7 +265,7 @@ def run_inference(clip_id, model, processor):
             data=model_inputs,
             top_p=0.98,
             temperature=0.6,
-            num_traj_samples=1,
+            num_traj_samples=1, # only run it once on the clip
             max_generation_length=256,
             return_extra=True,
         )
@@ -197,17 +281,19 @@ def compute_min_ade(pred_xyz, gt_xy):
 
 
 
-def minADE_across_all_clips(model, processor):
+def ADE_across_all_clips(model, processor, out_dir):
+    os.makedirs(out_dir, exist_ok=True) 
     clip_ids = pd.read_parquet("clip_ids.parquet")["clip_id"].tolist()
 
     results = []
     for idx, clip_id in enumerate(clip_ids):
-        # if idx > 2:
+        # if idx > 1:
         #     break
         print(f"\n[{idx+1}/{len(clip_ids)}] Processing clip: {clip_id}")
         # pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
-
-        while True:
+        MAX_RETRIES = 5
+        pred_xyz = gt_xy = None
+        for attempt in range(MAX_RETRIES):
             try:
                 pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
                 break
@@ -215,20 +301,24 @@ def minADE_across_all_clips(model, processor):
                 print(f"Failed on clip {clip_id}: {e}, retrying in 30s...")
                 time.sleep(30)
 
+        if pred_xyz is None:
+            print(f"  giving up on {clip_id} after {MAX_RETRIES} attempts, skipping")
+            continue   # move to the next clip
+
         min_ade = compute_min_ade(pred_xyz, gt_xy)
         results.append({"clip_id": clip_id,
-                         "minADE": min_ade,
+                         "ADE": min_ade,
                          "parquet_index": idx})  # original parquet index
         
 
     results_df = pd.DataFrame(results)
-    results_df.to_csv("dataset_results.csv", index=False)
-
-    min_ade_df = results_df["minADE"]
+    results_df.to_csv(os.path.join(out_dir, "dataset_results.csv"), index=False)
+    
+    min_ade_df = results_df["ADE"]
     print(f"\n── Dataset summary ──────────────────────")
     print(f"Clips processed : {len(results_df)}")
-    print(f"Mean minADE     : {min_ade_df.mean():.4f} m")
-    print(f"Median minADE   : {min_ade_df.median():.4f} m")
+    print(f"Mean ADE     : {min_ade_df.mean():.4f} m")
+    print(f"Median ADE   : {min_ade_df.median():.4f} m")
 
     plt.figure()
     plt.hist(min_ade_df, bins="auto")
@@ -237,10 +327,10 @@ def minADE_across_all_clips(model, processor):
     num_bins = len(counts)
     print(f"Number of bins chosen: {num_bins}")
 
-    plt.xlabel("minADE (m)")
+    plt.xlabel("ADE (m)")
     plt.ylabel("Number of clips")
-    plt.title("minADE distribution across dataset")
-    plt.savefig("minADE_distribution.png")
+    plt.title(f"ADE distribution - {os.path.basename(out_dir)}")
+    plt.savefig(os.path.join(out_dir, f"ADE_distribution_keep{keep_ratio}.png"))
     plt.close()
 
 
@@ -252,7 +342,7 @@ def minADE_across_all_clips(model, processor):
     print(f"worst row data:{worst_row}")
     for label, row in [("Best", best_row), ("Worst", worst_row)]:
         pred_xyz, gt_xy, _ = run_inference(row["clip_id"], model, processor)
-        plot_clip(row["clip_id"], label, pred_xyz, gt_xy, row["minADE"], row["parquet_index"])
+        plot_clip(row["clip_id"], label, pred_xyz, gt_xy, row["ADE"], row["parquet_index"], out_dir)
 
 def random_clip(model, processor):
     clip_ids = pd.read_parquet("clip_ids.parquet")["clip_id"].tolist()
@@ -261,13 +351,75 @@ def random_clip(model, processor):
     
     pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
     min_ade = compute_min_ade(pred_xyz, gt_xy)
-    print(f"minADE: {min_ade:.4f} m")
+    print(f"ADE: {min_ade:.4f} m")
     
     plot_clip(clip_id, "Random", pred_xyz, gt_xy, min_ade, clip_ids.index(clip_id))
     
+
+import argparse
+import gc
+import time
+from datetime import datetime
+
 if __name__ == '__main__':
-    model, processor = load_model()
-    #model, processor = load_quantized_model("quantized_models/alpamayo1_5_nvfp4.pt", "nvfp4")    
-    optimized_model = torch.compile(model, backend="tensorrt") 
-    minADE_across_all_clips(optimized_model, processor)
-    print(f"total gemv count {gemv_count}")
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--quant", type=str, nargs="+", default=[""],
+                    choices=["", "nvfp4"],
+                    help='one or more: "" for bf16, "nvfp4" for nvfp4')
+    
+    parser.add_argument("--sparsity", type=float, nargs="+",
+                        default=[0.20, 0.40, 0.50, 0.60, 0.75, 0.90])
+    args = parser.parse_args()
+
+    # Start timing
+    start_time = time.time()
+    start_datetime = datetime.now()
+
+    print(f"\n===== EXPERIMENT START =====")
+    print(f"Start time: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"============================\n")
+
+    # SPARSITY_BY_QUANT = {args.quant: args.sparsity}
+    SPARSITY_BY_QUANT = {q: args.sparsity for q in args.quant}
+    RESULTS_ROOT = "sweep_results"
+
+    for quant, sparsity_levels in SPARSITY_BY_QUANT.items():
+        quant_tag = quant if quant else "bf16"
+        print(f"-----new model! running with quant tag: {quant_tag}")
+        model, processor = load_model(quant)
+        for sparsity in sparsity_levels:
+            keep_ratio = 1.0 - sparsity
+            gemv_count = 0
+            print(f"current keep ratio is: {keep_ratio}")
+            out_dir = os.path.join(RESULTS_ROOT, f"{quant_tag}_sparsity{int(sparsity*100)}")
+            ADE_across_all_clips(model, processor, out_dir)
+            print(f"gemv_count: {gemv_count}")
+        try:
+            model.to("cpu")
+        except Exception:
+            pass
+        del model, processor
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+        print(f"after cleanup: {torch.cuda.memory_allocated()/1e9:.1f}G allocated, "
+            f"{torch.cuda.memory_reserved()/1e9:.1f}G reserved")
+        
+    # End timing
+    end_time = time.time()
+    end_datetime = datetime.now()
+
+    elapsed_seconds = end_time - start_time
+
+    hours, remainder = divmod(elapsed_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    print(f"\n===== EXPERIMENT END =====")
+    print(f"End time: {end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(
+        f"Total runtime: "
+        f"{int(hours)}h {int(minutes)}m {seconds:.2f}s"
+    )
+    print(f"==========================\n")
