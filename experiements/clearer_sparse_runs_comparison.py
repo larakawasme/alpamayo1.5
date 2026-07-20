@@ -111,7 +111,7 @@ ax.text(0.5, 0.95, "*value above each point is avg ADE",
 
 ax.set_xlabel("Sparsity (%)")
 ax.set_ylabel("Average ADE")
-ax.set_title("Average ADE vs Sparsity - bf16")
+ax.set_title("Average ADE vs Sparsity - nvfp4")
 ax.grid(True, alpha=0.3)
 ax.legend(fontsize=8)
 finish(fig, "avg_ade_vs_sparsity.png")
@@ -130,6 +130,7 @@ if baseline_name is None:
 else:
     baseline = runs[baseline_name][["parquet_index", "ADE"]].rename(columns={"ADE": "ADE_base"})
     base_pct = sparsity_from_name(baseline_name)
+    correlation_results = []
 
     for i, name in enumerate(run_names):
         if name == baseline_name:
@@ -141,6 +142,13 @@ else:
             on="parquet_index",
         )
 
+        # correlation coefficient
+        corr = merged["ADE_base"].corr(merged["ADE_sparse"])
+        correlation_results.append({ # append to save
+            "sparsity": sparsity_from_name(name),
+            "pearson_correlation": corr,
+        })
+        
         fig, ax = plt.subplots(figsize=(7, 7))
         ax.scatter(merged["ADE_base"], merged["ADE_sparse"],
                    s=25, alpha=0.6,
@@ -157,8 +165,26 @@ else:
         pct = sparsity_from_name(name)
         ax.set_xlabel(f"ADE - non-sparse baseline ({base_pct}%)")
         ax.set_ylabel(f"ADE - {pct}% sparse")
-        ax.set_title(f"{pct}% sparse vs non-sparse - bf16")
+        ax.set_title(f"{pct}% sparse vs non-sparse - nvfp4")
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
+        ax.text(
+            0.05, 0.95,
+            f"Pearson r = {corr:.3f}",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            fontsize=10,
+            bbox=dict(facecolor="white", alpha=0.8, edgecolor="none")
+        )
         finish(fig, f"per_clip_ade_{pct}_vs_baseline.png")
+   
+    # save correlation data
+    corr_df = pd.DataFrame(correlation_results)
+    corr_path = os.path.join(
+        OUTPUT_DIR,
+        "sparsity_vs_correlation_coefficients.csv"
+    )
+    corr_df.to_csv(corr_path, index=False)
+    print(f"Saved {corr_path}")
