@@ -19,7 +19,7 @@ from matplotlib.ticker import MultipleLocator
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
-DATA_FOLDER = "./quantized_results_all_clips_nvfp4/sparsity_data"          # <-- change this to your folder path
+DATA_FOLDER = "./quantized_results_all_clips_nvfp4/sparsity_data/"          # <-- change this to your folder path
 CSV_PATTERN = "*.csv"          # matches any .csv in that folder
 OUTPUT_DIR  = "./quantized_results_all_clips_nvfp4/sparsity_data/sparse_comparison_plots - jul_17"        # where to save the figures (set None to just show)
 CUSTOM_COLOURS = [
@@ -32,7 +32,7 @@ CUSTOM_COLOURS = [
     "#f032e6",  # magenta
     "#bfef45",  # lime
     "#fabed4",  # pink
-    "#27857A",  # teal
+    "#1C5A53",  # teal
 ]
 
 EXCLUDE_FILES = [
@@ -180,8 +180,30 @@ else:
         )
         finish(fig, f"per_clip_ade_{pct}_vs_baseline.png")
    
-    # save correlation data
+   # -------- Sparisty vs correlation ------
+    fig, ax = plt.subplots(figsize=(7, 7))
     corr_df = pd.DataFrame(correlation_results)
+
+    ax.plot(corr_df["sparsity"], corr_df["pearson_correlation"], "-", color="#888888", zorder=1)  # trend line
+    ax.scatter(corr_df["sparsity"], corr_df["pearson_correlation"],s=25, alpha=1, color=CUSTOM_COLOURS[4])
+
+    ax.set_xlabel(f"Sparsity amount (%)")
+    ax.set_ylabel(f"Correlation Coefficient")
+    ax.set_title(f"Correlation Coefficient vs Sparsity - nvfp4")
+    ax.set_xticks(corr_df["sparsity"])
+
+    min_spacing = 0.005  # minimum correlation difference between ticks
+    y_ticks = []
+
+    for corr in corr_df["pearson_correlation"]:
+        if not y_ticks or abs(corr - y_ticks[-1]) >= min_spacing:
+            y_ticks.append(corr)
+
+    ax.set_yticks(y_ticks)
+
+    finish(fig, f"correlation_vs_sparsity_nvfp4.png")
+    
+    # save correlation data
     corr_path = os.path.join(
         OUTPUT_DIR,
         "sparsity_vs_correlation_coefficients.csv"
