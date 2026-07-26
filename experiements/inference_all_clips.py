@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 import os
 import time
 import sys
-sys.path.insert(0, '/home/lara/alpamayo1.5/experiements/gemvCUTLASS')
-import gemv_ext
+#sys.path.insert(0, '/home/lara/alpamayo1.5/experiements/gemvCUTLASS')
+#import gemv_ext
 
 
 MAX_CLIPS = 51
@@ -33,48 +33,65 @@ QUANT_CFG_CHOICES = {
 import traceback
 import torch.nn as nn
 from functools import lru_cache
+import traceback
+from modelopt.torch.quantization.qtensor.nvfp4_tensor import NVFP4QTensor
 
+_original_dequantize = NVFP4QTensor.dequantize
 
-# def _patched_linear_forward(self, x):
-#     print(f"Linear({self.in_features}, {self.out_features}) input shape: {x.shape}")
-#     traceback.print_stack(limit=100)
-#     return _orig_linear_forward(self, x)
+def traced_dequantize(self, *args, **kwargs):
+    print("\nENTERED NVFP4QTensor.dequantize", flush=True)
+    #traceback.print_stack(limit=50)
+    print(
+          "Calling original from:",
+          _original_dequantize.__code__.co_filename,
+          flush=True,
+      )
+    
+    return _original_dequantize(self, *args, **kwargs)
+
+NVFP4QTensor.dequantize = traced_dequantize
+
+import inspect
+
+print("Original dequantize function:", _original_dequantize, flush=True)
+print("Loaded Python file:", inspect.getfile(_original_dequantize), flush=True)
+print("Code filename:", _original_dequantize.__code__.co_filename, flush=True)
+print("Starting line:", _original_dequantize.__code__.co_firstlineno, flush=True)
+print(inspect.getsource(_original_dequantize), flush=True)
 
 _orig_linear_forward = nn.Linear.forward
 gemv_count = 0
 keep_ratio = 1
+sparsity_mode = "top_k"
+random_debug_count = 0
 
-#WORKED FOR SPARSITY!
 def _patched_linear_forward(self, x):
     global gemv_count
     is_gemv = x.shape[-2] == 1 if x.dim() >= 2 else False
     if is_gemv:
+        gemv_count +=1
+
         # Magnitude before sparsification - suggestionf from ningfeng
         mag_before = x.norm()
 
-        gemv_count +=1
-        #num_zeros = (x == 0).sum().item()
-        total = x.numel()
-        # weight matrix has shape out by in shape. linear layer computes x @ W.T so x is 1 by in shape and W.T is in by outshape
-        #print(f"*** GEMV *** Linear({self.in_features}, {self.out_features}) input tensor shape: {x.shape} dtype: {x.dtype}")
-
-        k = int(x.numel() * keep_ratio)
-        threshold = x.abs().flatten().topk(k).values[-1]
-        # Sparsify
-        x = x * (x.abs() >= threshold)
+        # select sparsity type
+        if sparsity_mode == "top_k":
+           x = _top_k_sparsity(x)
+        elif sparsity_mode == "random":
+            x = _random_sparsity(x)
+        else:
+            raise ValueError("unsupported sparsity type")
 
         # Magnitude after sparsification - suggestion from ningfeng
         mag_after = x.norm()
         # Rescale remaining zeros values
-
         x = x * (mag_before / mag_after) #NOTE UNCOMMENT THIS
-
-        #num_zeros_after = (x == 0).sum().item()
-
+        
         if gemv_count == 1:
             W = self.weight
 
             print("\n===== FIRST GEMV LAYER =====")
+            print(f"sparsity type: {sparsity_mode}")
             print("Layer:", self)
             print("Weight shape:", W.shape)
             print("Weight dtype:", W.dtype)
@@ -89,14 +106,80 @@ def _patched_linear_forward(self, x):
 
             print("============================\n")
 
-        #     traceback.print_stack(limit=100)
-            #print(f"zeros before: {num_zeros}/{total} ({100*num_zeros/total:.2f}%)")
             print(f"multiplying by magnitudes: debugging first vector found. mag before = {mag_before}, mag after = {mag_after}")
-            #print(f"zeros after: {num_zeros_after}/{total} ({100*num_zeros_after/total:.2f}%)")
 
     return _orig_linear_forward(self, x)
 
 nn.Linear.forward = _patched_linear_forward
+
+def _top_k_sparsity(x):
+    # weight matrix has shape out by in shape. linear layer computes x @ W.T so x is 1 by in shape and W.T is in by outshape
+    #print(f"*** GEMV *** Linear({self.in_features}, {self.out_features}) input tensor shape: {x.shape} dtype: {x.dtype}")
+
+    k = int(x.numel() * keep_ratio) # number of elements to keep
+    threshold = x.abs().flatten().topk(k).values[-1]
+    # Sparsify
+    x = x * (x.abs() >= threshold)
+
+    return x
+
+def _random_sparsity(x):
+    k = int(x.numel() * keep_ratio) # number of elements to keep
+    # create a flat mask
+    mask = torch.cat([
+        torch.ones(k, device=x.device),
+        torch.zeros(x.numel() - k, device=x.device)
+    ]) # make sure on same gpu as activation vector
+
+    # Randomly shuffle the mask
+    mask = mask[torch.randperm(x.numel(), device=x.device)]
+    # Reshape mask to same shape as x
+    mask = mask.view_as(x)
+
+    # Apply sparsity
+    x_sparse = x * mask
+
+    # Debug only the first call
+    global random_debug_count
+
+    if random_debug_count == 0:
+        torch.set_printoptions(threshold=float("inf"))
+        print("\n===== RANDOM SPARSITY DEBUG =====")
+
+        print("Original x:")
+        print(x)
+
+        print("\nSparse x:")
+        print(x_sparse)
+
+        print("\nMask:")
+        print(mask)
+
+        print("\nOriginal number of zeros:")
+        print((x == 0).sum().item())
+
+        print("Sparse number of zeros:")
+        print((x_sparse == 0).sum().item())
+
+        print("Expected number of kept elements:", k)
+        print("Expected number of zeroed elements:", x.numel() - k)
+
+        print(
+            "Actual number of nonzero elements:",
+            (x_sparse != 0).sum().item()
+        )
+
+        print(
+            "Actual number of zeros:",
+            (x_sparse == 0).sum().item()
+        )
+
+        print("=================================\n")
+
+        random_debug_count += 1
+
+    return x_sparse
+
 
 #WIP FOR CUTLASS
 # def _patched_linear_forward(self, x):
@@ -168,15 +251,16 @@ def load_model(quantization=""):
     elif quantization == "nvfp4":
         mto.enable_huggingface_checkpointing()          
         model = Alpamayo1_5.from_pretrained(
-                        "./alpamayo-nvfp4-fake-quant",
+                        "./alpamayo-nvfp4-real-quant",
                         device_map="cpu",   
                         dtype="auto",
                         attn_implementation="eager"
         )
+        print("done")
         model.tie_weights()
-        mtq.compress(model)
+        #mtq.compress(model)
         model.to("cuda:0")
-        model = torch.compile(model, backend="torch_tensorrt")
+        #model = torch.compile(model, backend="torch_tensorrt")
     else:
         raise ValueError(f"Unknown quantization type: {quantization}")
     
@@ -287,7 +371,7 @@ def ADE_across_all_clips(model, processor, out_dir):
 
     results = []
     for idx, clip_id in enumerate(clip_ids):
-        # if idx > 1:
+        # if idx > 10:
         #     break
         print(f"\n[{idx+1}/{len(clip_ids)}] Processing clip: {clip_id}")
         # pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
@@ -364,21 +448,27 @@ from datetime import datetime
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--quant", type=str, nargs="+", default=[""],
-                    choices=["", "nvfp4"],
-                    help='one or more: "" for bf16, "nvfp4" for nvfp4')
+    parser.add_argument("--quant", 
+                        type=str, 
+                        nargs="+", default=[""],
+                        choices=["", "nvfp4"],
+                        help='one or more: "" for bf16, "nvfp4" for nvfp4'
+                        )
     
-    parser.add_argument("--sparsity", type=float, nargs="+",
-                        default=[0.20, 0.40, 0.50, 0.60, 0.75, 0.90])
+    parser.add_argument("--sparsity", 
+                        type=float, 
+                        nargs="+",
+                        default=[0.20, 0.40, 0.50, 0.60, 0.7, 0.75, 0.80, 0.85, 0.90]
+                        )
+    
+    parser.add_argument("--sparsity_mode", type=str, default="top_k",
+                        choices=["top_k", "random"],
+                        help='one or more: "top_k" for top k selection sparsity, "random" for random sparsity'
+                        )
+
     args = parser.parse_args()
+    sparsity_mode = args.sparsity_mode
 
-    # Start timing
-    start_time = time.time()
-    start_datetime = datetime.now()
-
-    print(f"\n===== EXPERIMENT START =====")
-    print(f"Start time: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"============================\n")
 
     # SPARSITY_BY_QUANT = {args.quant: args.sparsity}
     SPARSITY_BY_QUANT = {q: args.sparsity for q in args.quant}
@@ -386,15 +476,49 @@ if __name__ == '__main__':
 
     for quant, sparsity_levels in SPARSITY_BY_QUANT.items():
         quant_tag = quant if quant else "bf16"
-        print(f"-----new model! running with quant tag: {quant_tag}")
+        print(f"-----new model! running with quant tag: {quant_tag}, with sparsity mode: {sparsity_mode}-----")
         model, processor = load_model(quant)
+
         for sparsity in sparsity_levels:
+            # Start timing
+            torch.cuda.synchronize()
+            start_time = time.perf_counter()
+            start_datetime = datetime.now()
+
+            print(f"\n===== EXPERIMENT START =====")
+            print(f"Start time: {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"============================\n")
+
             keep_ratio = 1.0 - sparsity
             gemv_count = 0
+            if not 0 < keep_ratio <= 1:
+                raise ValueError("keep_ratio must be between 0 and 1")
+            
+            print(f"current spasrity level: {sparsity}")
             print(f"current keep ratio is: {keep_ratio}")
             out_dir = os.path.join(RESULTS_ROOT, f"{quant_tag}_sparsity{int(sparsity*100)}")
+
             ADE_across_all_clips(model, processor, out_dir)
             print(f"gemv_count: {gemv_count}")
+
+            # End timing
+            torch.cuda.synchronize()
+            end_time = time.perf_counter()
+            end_datetime = datetime.now()
+
+            elapsed_seconds = end_time - start_time
+
+            hours, remainder = divmod(elapsed_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+
+            print(f"\n===== EXPERIMENT END =====")
+            print(f"End time: {end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(
+                f"Total runtime: "
+                f"{int(hours)}h {int(minutes)}m {seconds:.2f}s"
+            )
+            print(f"==========================\n")
+
         try:
             model.to("cpu")
         except Exception:
@@ -407,19 +531,3 @@ if __name__ == '__main__':
         print(f"after cleanup: {torch.cuda.memory_allocated()/1e9:.1f}G allocated, "
             f"{torch.cuda.memory_reserved()/1e9:.1f}G reserved")
         
-    # End timing
-    end_time = time.time()
-    end_datetime = datetime.now()
-
-    elapsed_seconds = end_time - start_time
-
-    hours, remainder = divmod(elapsed_seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    print(f"\n===== EXPERIMENT END =====")
-    print(f"End time: {end_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(
-        f"Total runtime: "
-        f"{int(hours)}h {int(minutes)}m {seconds:.2f}s"
-    )
-    print(f"==========================\n")
