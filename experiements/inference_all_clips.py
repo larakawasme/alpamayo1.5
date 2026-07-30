@@ -11,11 +11,27 @@ from alpamayo1_5.load_physical_aiavdataset import load_physical_aiavdataset
 from alpamayo1_5 import helper
 import matplotlib.pyplot as plt
 import os
+import csv
+import json
+import re
 import time
 import sys
 #sys.path.insert(0, '/home/lara/alpamayo1.5/experiements/gemvCUTLASS')
 #import gemv_ext
 
+import traceback
+import torch.nn as nn
+from functools import lru_cache
+import traceback
+from modelopt.torch.quantization.qtensor.nvfp4_tensor import NVFP4QTensor
+from pathlib import Path
+from layer_analysis_fns import label_linear_layers, save_activation_vector_pruned_collumns
+import inspect
+
+from modelopt.torch.quantization.backends.gemm_registry import (
+    enable_real_quant_gemm,
+    is_real_quant_gemm_enabled,
+)
 
 MAX_CLIPS = 51
 QUANT_CFG_CHOICES = {
@@ -28,36 +44,38 @@ QUANT_CFG_CHOICES = {
     "int8_sq":            mtq.INT8_SMOOTHQUANT_CFG,
     "int4_awq":           mtq.INT4_AWQ_CFG,
     "w4a8_awq":           mtq.W4A8_AWQ_BETA_CFG,
-}
+} 
 
-import traceback
-import torch.nn as nn
-from functools import lru_cache
-import traceback
-from modelopt.torch.quantization.qtensor.nvfp4_tensor import NVFP4QTensor
 
 _original_dequantize = NVFP4QTensor.dequantize
 
+dequantize_count = 0
 def traced_dequantize(self, *args, **kwargs):
-    print("\nENTERED NVFP4QTensor.dequantize", flush=True)
-    #traceback.print_stack(limit=50)
-    print(
-          "Calling original from:",
-          _original_dequantize.__code__.co_filename,
-          flush=True,
-      )
+    global dequantize_count
+    if dequantize_count == 0:
+        print("\nENTERED NVFP4QTensor.dequantize", flush=True)
+        traceback.print_stack(limit=50)
+        print(
+            "Calling original from:",
+            _original_dequantize.__code__.co_filename,
+            flush=True,
+        )
+    dequantize_count += 1
+
+    if dequantize_count <= 5:
+        print(f"NVFP4 dequantize call #{dequantize_count}")
     
     return _original_dequantize(self, *args, **kwargs)
 
 NVFP4QTensor.dequantize = traced_dequantize
 
-import inspect
 
-print("Original dequantize function:", _original_dequantize, flush=True)
-print("Loaded Python file:", inspect.getfile(_original_dequantize), flush=True)
-print("Code filename:", _original_dequantize.__code__.co_filename, flush=True)
-print("Starting line:", _original_dequantize.__code__.co_firstlineno, flush=True)
-print(inspect.getsource(_original_dequantize), flush=True)
+
+# print("Original dequantize function:", _original_dequantize, flush=True)
+# print("Loaded Python file:", inspect.getfile(_original_dequantize), flush=True)
+# print("Code filename:", _original_dequantize.__code__.co_filename, flush=True)
+# print("Starting line:", _original_dequantize.__code__.co_firstlineno, flush=True)
+# print(inspect.getsource(_original_dequantize), flush=True)
 
 _orig_linear_forward = nn.Linear.forward
 gemv_count = 0
@@ -67,31 +85,45 @@ random_debug_count = 0
 
 def _patched_linear_forward(self, x):
     global gemv_count
-    is_gemv = x.shape[-2] == 1 if x.dim() >= 2 else False
+    is_gemv = x.shape[1] == 1 and x.shape[0] == 1 if x.dim() == 3 else False
     if is_gemv:
         gemv_count +=1
 
+        x_before = x
+
+        layer_name = self._sparsity_layer_name
         # Magnitude before sparsification - suggestionf from ningfeng
         mag_before = x.norm()
 
-        # select sparsity type
+        # select sparsity type. returns pruned x and the keep mask tha twas used
         if sparsity_mode == "top_k":
-           x = _top_k_sparsity(x)
+           x, keep_mask = _top_k_sparsity(x)
         elif sparsity_mode == "random":
-            x = _random_sparsity(x)
+            x, keep_mask = _random_sparsity(x)
         else:
             raise ValueError("unsupported sparsity type")
+
+        # Save information about the pruned activations and weight columns.
+        save_activation_vector_pruned_collumns(
+            layer_name=layer_name,
+            x_before=x_before,
+            keep_mask=keep_mask,
+            weight=self.weight,
+            sparsity_level=(1-keep_ratio)
+        )
 
         # Magnitude after sparsification - suggestion from ningfeng
         mag_after = x.norm()
         # Rescale remaining zeros values
         x = x * (mag_before / mag_after) #NOTE UNCOMMENT THIS
-        
+        #print("layer name:", self._sparsity_layer_name)
+
         if gemv_count == 1:
             W = self.weight
 
             print("\n===== FIRST GEMV LAYER =====")
             print(f"sparsity type: {sparsity_mode}")
+            print("Module:", self._sparsity_layer_name)
             print("Layer:", self)
             print("Weight shape:", W.shape)
             print("Weight dtype:", W.dtype)
@@ -116,15 +148,16 @@ def _top_k_sparsity(x):
     # weight matrix has shape out by in shape. linear layer computes x @ W.T so x is 1 by in shape and W.T is in by outshape
     #print(f"*** GEMV *** Linear({self.in_features}, {self.out_features}) input tensor shape: {x.shape} dtype: {x.dtype}")
 
-    k = int(x.numel() * keep_ratio) # number of elements to keep
+    k = max(1, int(x.numel() * keep_ratio)) # number of elements to keep
     threshold = x.abs().flatten().topk(k).values[-1]
     # Sparsify
-    x = x * (x.abs() >= threshold)
+    keep_mask = x.abs() >= threshold
+    x = x * keep_mask
 
-    return x
+    return x, keep_mask
 
 def _random_sparsity(x):
-    k = int(x.numel() * keep_ratio) # number of elements to keep
+    k = max(1, int(x.numel() * keep_ratio)) # number of elements to keep
     # create a flat mask
     mask = torch.cat([
         torch.ones(k, device=x.device),
@@ -146,14 +179,14 @@ def _random_sparsity(x):
         torch.set_printoptions(threshold=float("inf"))
         print("\n===== RANDOM SPARSITY DEBUG =====")
 
-        print("Original x:")
-        print(x)
+        # print("Original x:")
+        # print(x)
 
-        print("\nSparse x:")
-        print(x_sparse)
+        # print("\nSparse x:")
+        # print(x_sparse)
 
-        print("\nMask:")
-        print(mask)
+        # print("\nMask:")
+        # print(mask)
 
         print("\nOriginal number of zeros:")
         print((x == 0).sum().item())
@@ -178,7 +211,7 @@ def _random_sparsity(x):
 
         random_debug_count += 1
 
-    return x_sparse
+    return x_sparse, mask.bool()
 
 
 #WIP FOR CUTLASS
@@ -258,9 +291,41 @@ def load_model(quantization=""):
         )
         print("done")
         model.tie_weights()
-        #mtq.compress(model)
         model.to("cuda:0")
-        #model = torch.compile(model, backend="torch_tensorrt")
+        #enable_real_quant_gemm(model)
+        # debugging quantization
+        print("real quant gemm enabled anywhere:", is_real_quant_gemm_enabled(model))
+
+
+        enabled_layers = []
+        disabled_layers = []
+
+        for name, module in model.named_modules():
+            if hasattr(module, "weight_quantizer") and hasattr(module, "input_quantizer"):
+                status = getattr(module, "_use_real_quant_gemm", False)
+                if status:
+                    enabled_layers.append(name)
+                else:
+                    disabled_layers.append(name)
+
+        #debuging quantization
+        print(f"real-quant GEMM enabled on {len(enabled_layers)} layers")
+        print(f"real-quant GEMM disabled on {len(disabled_layers)} layers")
+        print("\nSample enabled:", enabled_layers[:5])
+        print("\nSample disabled:", disabled_layers[:5])
+
+        # debgging stuff specifically check a language-model attention layer
+        lm_layer = model.vlm.model.language_model.layers[0].self_attn.q_proj  # adjust path if needed
+        print("\nlanguage model q_proj:")
+        print("  input_quantizer enabled:", lm_layer.input_quantizer.is_enabled)
+        print("  weight_quantizer enabled:", lm_layer.weight_quantizer.is_enabled)
+        print("  _use_real_quant_gemm:", getattr(lm_layer, "_use_real_quant_gemm", False))
+
+
+        model = torch.compile(model, backend="torch_tensorrt", fullgraph=True)
+
+        print("model type after compile:", type(model))
+        print("has _orig_mod:", hasattr(model, "_orig_mod"))
     else:
         raise ValueError(f"Unknown quantization type: {quantization}")
     
@@ -366,13 +431,15 @@ def compute_min_ade(pred_xyz, gt_xy):
 
 
 def ADE_across_all_clips(model, processor, out_dir):
+    global dequantize_count
     os.makedirs(out_dir, exist_ok=True) 
     clip_ids = pd.read_parquet("clip_ids.parquet")["clip_id"].tolist()
 
     results = []
     for idx, clip_id in enumerate(clip_ids):
-        # if idx > 10:
-        #     break
+        if idx > 1:
+            break
+        dequantize_count = 0
         print(f"\n[{idx+1}/{len(clip_ids)}] Processing clip: {clip_id}")
         # pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
         MAX_RETRIES = 5
@@ -393,7 +460,7 @@ def ADE_across_all_clips(model, processor, out_dir):
         results.append({"clip_id": clip_id,
                          "ADE": min_ade,
                          "parquet_index": idx})  # original parquet index
-        
+        print("dequantize count on clip"f"{idx}:", dequantize_count)
 
     results_df = pd.DataFrame(results)
     results_df.to_csv(os.path.join(out_dir, "dataset_results.csv"), index=False)
@@ -478,7 +545,7 @@ if __name__ == '__main__':
         quant_tag = quant if quant else "bf16"
         print(f"-----new model! running with quant tag: {quant_tag}, with sparsity mode: {sparsity_mode}-----")
         model, processor = load_model(quant)
-
+        label_linear_layers(model)
         for sparsity in sparsity_levels:
             # Start timing
             torch.cuda.synchronize()
@@ -497,8 +564,10 @@ if __name__ == '__main__':
             print(f"current spasrity level: {sparsity}")
             print(f"current keep ratio is: {keep_ratio}")
             out_dir = os.path.join(RESULTS_ROOT, f"{quant_tag}_sparsity{int(sparsity*100)}")
-
+            #_configure_linear_csv_capture(out_dir)
             ADE_across_all_clips(model, processor, out_dir)
+                #_close_linear_csv_capture()
+
             print(f"gemv_count: {gemv_count}")
 
             # End timing
