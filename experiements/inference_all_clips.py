@@ -5,7 +5,7 @@ from accelerate import dispatch_model, infer_auto_device_map
 import modelopt.torch.opt as mto
 
 import torch
-import torch_tensorrt
+#import torch_tensorrt
 from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
 from alpamayo1_5.load_physical_aiavdataset import load_physical_aiavdataset
 from alpamayo1_5 import helper
@@ -25,26 +25,27 @@ from functools import lru_cache
 import traceback
 from modelopt.torch.quantization.qtensor.nvfp4_tensor import NVFP4QTensor
 from pathlib import Path
-from layer_analysis_fns import label_linear_layers, save_activation_vector_pruned_collumns
+from layer_analysis_fns import label_linear_layers, save_activation_vector_pruned_collumns, save_sample_weight_columns, save_sample_weight_rows,find_nearest_columns, save_nearest_column_statistics
 import inspect
 
 from modelopt.torch.quantization.backends.gemm_registry import (
     enable_real_quant_gemm,
     is_real_quant_gemm_enabled,
 )
+import torch.nn.functional as F
 
 MAX_CLIPS = 51
-QUANT_CFG_CHOICES = {
-    "nvfp4":              mtq.NVFP4_DEFAULT_CFG,
-    "nvfp4_mlp_only":     mtq.NVFP4_MLP_ONLY_CFG,
-    "nvfp4_experts_only": mtq.NVFP4_EXPERTS_ONLY_CFG,
-    "nvfp4_omlp_only":    mtq.NVFP4_OMLP_ONLY_CFG,
-    "fp8":                mtq.FP8_DEFAULT_CFG,
-    "int8":               mtq.INT8_DEFAULT_CFG,
-    "int8_sq":            mtq.INT8_SMOOTHQUANT_CFG,
-    "int4_awq":           mtq.INT4_AWQ_CFG,
-    "w4a8_awq":           mtq.W4A8_AWQ_BETA_CFG,
-} 
+# QUANT_CFG_CHOICES = {
+#     "nvfp4":              mtq.NVFP4_DEFAULT_CFG,
+#     "nvfp4_mlp_only":     mtq.NVFP4_MLP_ONLY_CFG,
+#     "nvfp4_experts_only": mtq.NVFP4_EXPERTS_ONLY_CFG,
+#     "nvfp4_omlp_only":    mtq.NVFP4_OMLP_ONLY_CFG,
+#     "fp8":                mtq.FP8_DEFAULT_CFG,
+#     "int8":               mtq.INT8_DEFAULT_CFG,
+#     "int8_sq":            mtq.INT8_SMOOTHQUANT_CFG,
+#     "int4_awq":           mtq.INT4_AWQ_CFG,
+#     "w4a8_awq":           mtq.W4A8_AWQ_BETA_CFG,
+# } 
 
 
 _original_dequantize = NVFP4QTensor.dequantize
@@ -87,11 +88,18 @@ def _patched_linear_forward(self, x):
     global gemv_count
     is_gemv = x.shape[1] == 1 and x.shape[0] == 1 if x.dim() == 3 else False
     if is_gemv:
-        gemv_count +=1
 
-        x_before = x
+        x_before = x.clone()
 
         layer_name = self._sparsity_layer_name
+
+        # Skip sparsification for the language model head.
+        if (layer_name.endswith("lm_head") ):
+        #     #or layer_name.endswith("up_proj") 
+        #     #or layer_name.endswith("gate_proj")):
+        #     #print(f"skipping{layer_name}")
+             return _orig_linear_forward(self, x)
+
         # Magnitude before sparsification - suggestionf from ningfeng
         mag_before = x.norm()
 
@@ -100,23 +108,35 @@ def _patched_linear_forward(self, x):
            x, keep_mask = _top_k_sparsity(x)
         elif sparsity_mode == "random":
             x, keep_mask = _random_sparsity(x)
+        elif sparsity_mode == "rough_top_k":
+            x, keep_mask = _exponent_histogram_sparsity(x)
         else:
             raise ValueError("unsupported sparsity type")
 
-        # Save information about the pruned activations and weight columns.
-        save_activation_vector_pruned_collumns(
-            layer_name=layer_name,
-            x_before=x_before,
-            keep_mask=keep_mask,
-            weight=self.weight,
-            sparsity_level=(1-keep_ratio)
-        )
+        # Save information aobut the pruned activations and weight columns.
+        # save_activation_vector_pruned_collumns(
+        #     layer_name=layer_name,
+        #     x_before=x_before,
+        #     keep_mask=keep_mask,
+        #     weight=self.weight,
+        #     sparsity_level=(1-keep_ratio)
+        # )
 
-        # Magnitude after sparsification - suggestion from ningfeng
+        # save_sample_weight_columns(layer_name, self.weight, 1-keep_ratio, 100)
+        # save_sample_weight_rows(layer_name, self.weight, 1-keep_ratio, 100)
+
+        # Replace ordinary zero-pruned x with compensated x.
+        # x = compensate_sparse_activation(
+        #     weight=self.weight,
+        #     x_before=x_before,
+        #     keep_mask=keep_mask,
+        # )
+        # # Magnitude after sparsification - suggestion from ningfeng
         mag_after = x.norm()
-        # Rescale remaining zeros values
-        x = x * (mag_before / mag_after) #NOTE UNCOMMENT THIS
-        #print("layer name:", self._sparsity_layer_name)
+        # # Rescale remaining zeros values
+        # x = x * (mag_before / mag_after) #NOTE UNCOMMENT THIS
+        # #print("layer name:", self._sparsity_layer_name)
+        gemv_count +=1
 
         if gemv_count == 1:
             W = self.weight
@@ -140,9 +160,194 @@ def _patched_linear_forward(self, x):
 
             print(f"multiplying by magnitudes: debugging first vector found. mag before = {mag_before}, mag after = {mag_after}")
 
+        #return replace_column_normal_distribution(self, keep_mask, x, x_before)
+        #return bitmap_mean_linear_forward(self, x_before, keep_mask)
+
     return _orig_linear_forward(self, x)
 
 nn.Linear.forward = _patched_linear_forward
+
+
+def compensate_sparse_activation(
+    weight: torch.Tensor,
+    x_before: torch.Tensor,
+    keep_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Zero the pruned activations, then adjust surviving activations so
+    their weight columns approximate the output contribution removed
+    by pruning.
+
+    Args:
+        weight:
+            Linear-layer weight with shape:
+                (out_features, in_features)
+
+        x_before:
+            Original dense activation, typically shape:
+                (1, 1, in_features)
+
+        keep_mask:
+            Boolean mask with the same shape as x_before.
+            True means kept; False means pruned.
+
+    Returns:
+        Corrected activation with the same shape, device, and dtype
+        as x_before.
+    """
+    original_shape = x_before.shape
+    original_dtype = x_before.dtype
+    original_device = x_before.device
+
+    # Solve in float32
+    weight_float = weight.float()
+    x_dense = x_before.float().reshape(-1)
+    keep_mask_flat = keep_mask.bool().reshape(-1)
+
+    if weight_float.shape[1] != x_dense.numel():
+        raise ValueError(
+            f"Weight has {weight_float.shape[1]} input columns, "
+            f"but activation has {x_dense.numel()} elements."
+        )
+
+    surviving_indices = torch.where(keep_mask_flat)[0]
+    pruned_indices = torch.where(~keep_mask_flat)[0]
+
+    # Nothing was pruned.
+    if pruned_indices.numel() == 0:
+        print("nothing pruned..returning")
+        return x_before
+
+    surviving_columns = weight_float[:, surviving_indices].to(device=weight.device, dtype=torch.float32)
+    pruned_columns = weight_float[:, pruned_indices].to(device=weight.device, dtype=torch.float32)
+
+    # Output contribution that was removed by zeroing x_P:
+    #
+    # lost_output = W[:, P] @ x[P]
+    lost_output = (
+        pruned_columns
+        @ x_dense[pruned_indices]
+    ).to(dtype=torch.float32)
+
+    # Find delta minimizing:
+    # ||W[:, S] @ delta - lost_output||_2
+    delta = torch.linalg.lstsq(
+        surviving_columns,
+        lost_output,
+    ).solution
+
+    # Start with ordinary zero pruning.
+    corrected_x = x_dense.clone()
+    corrected_x[pruned_indices] = 0.0
+
+    # Redistribute the lost contribution through surviving features.
+    corrected_x[surviving_indices] += delta
+    #print(f"mag before :\n {x_before.norm()}\n, now it is\n:{corrected_x.norm()}")
+    return (
+        corrected_x
+        .reshape(original_shape)
+        .to(
+            device=original_device,
+            dtype=original_dtype,
+        )
+    )
+
+def replace_column_normal_distribution(self, keep_mask, x, x_before):
+    # Work with the 1D activation vectors for this GEMV.
+    # x_before: original dense activation
+    # x: sparsified activation
+    # keep_mask: True for retained entries, False for pruned entries
+
+    pruned_mask = ~keep_mask.bool()
+
+    if pruned_mask.any():
+        # Work with the 1D activation vectors for this GEMV.
+        original_x = x_before.reshape(-1)
+        sparse_x = x.reshape(-1)
+        pruned_mask_flat = pruned_mask.reshape(-1)
+
+        # Make a temporary weight matrix. Do not modify self.weight permanently.
+        fake_weight = self.weight.clone()
+
+        # Columns corresponding to pruned activations.
+        original_pruned_columns = fake_weight[:, pruned_mask_flat]
+
+        # Generate replacement columns from N(weight_mean, weight_std²).
+        random_columns = torch.normal(
+            mean=0.000005,
+            std=0.02,
+            size=original_pruned_columns.shape,
+            device=fake_weight.device,
+            dtype=torch.bfloat16,
+        )
+
+        fake_weight[:, pruned_mask_flat] = random_columns
+
+        # Retained entries use their sparsified values.
+        # Pruned entries are restored to their original activation values.
+        fake_x = sparse_x.clone()
+        fake_x[pruned_mask_flat] = original_x[pruned_mask_flat]
+        fake_x = fake_x.reshape_as(x)
+
+        return F.linear(fake_x, fake_weight, self.bias)
+
+def bitmap_mean_linear_forward(
+    linear_layer,
+    x_before,
+    keep_mask,
+):
+    """
+    Simulate a linear layer where pruned activation columns use
+    sign(weight) * mean(abs(weight)) instead of the real weights.
+
+    Surviving columns:
+        use original weights
+
+    Pruned columns:
+        W[:, j] -> sign(W[:, j]) * mean(abs(W[:, j]))
+
+    Then perform the normal linear operation using the ORIGINAL x.
+    """
+
+    W = linear_layer.weight
+
+    # Shape: [in_features]
+    keep_mask = keep_mask.reshape(-1).bool()
+
+    # True where the activation/weight column was pruned.
+    pruned_mask = ~keep_mask
+
+    # Make a copy because we don't want to modify the model weights.
+    W_sim = W.clone()
+
+    # Get only the pruned columns.
+    W_pruned = W[:, pruned_mask]
+
+    # One mean absolute magnitude per pruned column.
+    #
+    # Shape: [number_of_pruned_columns]
+    with torch.no_grad():
+        column_mean = W_pruned.abs().mean(dim=0)
+        column_sign = W_pruned.mean(dim=0).sign()
+
+    # Replace each pruned column with:
+    #
+    #     sign(W[:, j]) * mean(abs(W[:, j]))
+    #
+
+    W_sim[:, pruned_mask] = (
+        W_pruned.sign()
+        * column_mean
+    )
+
+    # Now just do the normal linear layer with the modified W.
+    #
+    # IMPORTANT: use x_before, NOT the zero-pruned x.
+    return F.linear(x_before, W_sim, linear_layer.bias)
+
+import torch
+
+
 
 def _top_k_sparsity(x):
     # weight matrix has shape out by in shape. linear layer computes x @ W.T so x is 1 by in shape and W.T is in by outshape
@@ -213,6 +418,34 @@ def _random_sparsity(x):
 
     return x_sparse, mask.bool()
 
+def _exponent_histogram_sparsity(x):
+    """
+    approximate topk using exponent histogram
+    """
+    target_k = max(1, int(x.numel() * keep_ratio)) 
+    x_bits = x.view(torch.int16)
+    exponents =  (x_bits >>7) & 0xFF #extract just exponent bits
+    histogram = torch.bincount(exponents.flatten(), minlength=256)
+    reverse_cumsum = torch.cumsum(histogram.flip(0), dim=0)
+
+    # first idx where we have >= k 
+    idx = torch.searchsorted(reverse_cumsum, torch.tensor(target_k, device=x.device))
+    cuttoff = 255 - idx.item()  
+
+    # keep everytihng with exponent above cutoff
+    mask = exponents > cuttoff
+    #amt still needed from cutoff bin
+    num_kept = mask.sum().item()
+    remaining_needed = target_k - num_kept
+    if remaining_needed > 0:
+        cutoff_indices = (exponents == cuttoff).flatten().nonzero(as_tuple=True)[0]
+        selected = cutoff_indices[:remaining_needed]
+        flat_mask = mask.flatten()
+        flat_mask[selected] = True
+        mask = flat_mask.view_as(x)
+
+    sparse_x = x * mask
+    return sparse_x, mask
 
 #WIP FOR CUTLASS
 # def _patched_linear_forward(self, x):
@@ -279,7 +512,7 @@ def load_model(quantization=""):
                             attn_implementation="eager"
         )
         model.tie_weights()  
-        model = torch.compile(model, backend="torch_tensorrt")
+        #model = torch.compile(model, backend="torch_tensorrt")
 
     elif quantization == "nvfp4":
         mto.enable_huggingface_checkpointing()          
@@ -322,7 +555,7 @@ def load_model(quantization=""):
         print("  _use_real_quant_gemm:", getattr(lm_layer, "_use_real_quant_gemm", False))
 
 
-        model = torch.compile(model, backend="torch_tensorrt", fullgraph=True)
+        #model = torch.compile(model, backend="torch_tensorrt", fullgraph=True)
 
         print("model type after compile:", type(model))
         print("has _orig_mod:", hasattr(model, "_orig_mod"))
@@ -436,31 +669,35 @@ def ADE_across_all_clips(model, processor, out_dir):
     clip_ids = pd.read_parquet("clip_ids.parquet")["clip_id"].tolist()
 
     results = []
-    for idx, clip_id in enumerate(clip_ids):
-        if idx > 1:
-            break
-        dequantize_count = 0
-        print(f"\n[{idx+1}/{len(clip_ids)}] Processing clip: {clip_id}")
-        # pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
-        MAX_RETRIES = 5
-        pred_xyz = gt_xy = None
-        for attempt in range(MAX_RETRIES):
-            try:
-                pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
+    try:
+        for idx, clip_id in enumerate(clip_ids):
+            if idx > 600:
                 break
-            except Exception as e:
-                print(f"Failed on clip {clip_id}: {e}, retrying in 30s...")
-                time.sleep(30)
+            dequantize_count = 0
+            print(f"\n[{idx+1}/{len(clip_ids)}] Processing clip: {clip_id}")
+            # pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
+            MAX_RETRIES = 5
+            pred_xyz = gt_xy = None
+            for attempt in range(MAX_RETRIES):
+                try:
+                    pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)
+                    break
+                except Exception as e:
+                    print(f"Failed on clip {clip_id}: {e}, retrying in 30s...")
+                    time.sleep(30)
 
-        if pred_xyz is None:
-            print(f"  giving up on {clip_id} after {MAX_RETRIES} attempts, skipping")
-            continue   # move to the next clip
+            if pred_xyz is None:
+                print(f"  giving up on {clip_id} after {MAX_RETRIES} attempts, skipping")
+                continue   # move to the next clip
 
-        min_ade = compute_min_ade(pred_xyz, gt_xy)
-        results.append({"clip_id": clip_id,
-                         "ADE": min_ade,
-                         "parquet_index": idx})  # original parquet index
-        print("dequantize count on clip"f"{idx}:", dequantize_count)
+            min_ade = compute_min_ade(pred_xyz, gt_xy)
+            results.append({"clip_id": clip_id,
+                            "ADE": min_ade,
+                            "parquet_index": idx})  # original parquet index
+            #print("dequantize count on clip"f"{idx}:", dequantize_count)
+    
+    except KeyboardInterrupt:
+        print("\nCtrl+C detected! Saving partial results...")
 
     results_df = pd.DataFrame(results)
     results_df.to_csv(os.path.join(out_dir, "dataset_results.csv"), index=False)
@@ -529,7 +766,7 @@ if __name__ == '__main__':
                         )
     
     parser.add_argument("--sparsity_mode", type=str, default="top_k",
-                        choices=["top_k", "random"],
+                        choices=["top_k", "random", "rough_top_k"],
                         help='one or more: "top_k" for top k selection sparsity, "random" for random sparsity'
                         )
 
