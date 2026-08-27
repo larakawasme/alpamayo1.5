@@ -19,9 +19,9 @@ from matplotlib.ticker import MultipleLocator
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
-DATA_FOLDER = "./quantized_results_all_clips_nvfp4/sparsity_data/"          # <-- change this to your folder path
+DATA_FOLDER = "./sparsity_cublass_non_quant_experiements/sparse_rough_topk"          # <-- change this to your folder path
 CSV_PATTERN = "*.csv"          # matches any .csv in that folder
-OUTPUT_DIR  = "./quantized_results_all_clips_nvfp4/sparsity_data/sparse_comparison_plots - jul_17"        # where to save the figures (set None to just show)
+OUTPUT_DIR  = "./sparsity_cublass_non_quant_experiements/sparse_rough_topk/plots"        # where to save the figures (set None to just show)
 CUSTOM_COLOURS = [
     "#e6194b",  # red
     "#3cb44b",  # green
@@ -88,38 +88,71 @@ def finish(fig, filename):
 
 
  
-# ── PLOT 1: SPARSITY vs AVERAGE ADE ───────────────────────────────────────────
+# ── PLOT 1: SPARSITY vs  ADE (average displacement error) ───────────────────────────────────────────
 sparsities = np.array([sparsity_from_name(n) for n in run_names])
-mean_ades  = np.array([runs[n]["ADE"].mean() for n in run_names])
+ades  = np.array([runs[n]["ADE"].mean() for n in run_names])
  
 fig, ax = plt.subplots(figsize=(8, 5))
-ax.plot(sparsities, mean_ades, "-", color="#888888", zorder=1)  # trend line
-ax.scatter(sparsities, mean_ades, color=CUSTOM_COLOURS[4], s=70, zorder=2)
+ax.plot(sparsities, ades, "-", color="#888888", zorder=1)  # trend line
+ax.scatter(sparsities, ades, color=CUSTOM_COLOURS[3], s=70, zorder=2)
  # one x-tick at every sparsity value that actually exists
 ax.set_xticks(sparsities)
-# annotate each point with its mean ADE
-for s, m in zip(sparsities, mean_ades):
+# annotate each point with its ADE
+for s, m in zip(sparsities, ades):
     ax.annotate(f"{m:.3f}",
                 xy=(s, m),
                 xytext=(0, 8),               # 8 points above the marker
                 textcoords="offset points",
                 ha="center", fontsize=8)
     
-ax.text(0.5, 0.95, "*value above each point is avg ADE",
+ax.text(0.5, 0.95, "*value above each point is ADE",
         transform=ax.transAxes, ha="right", va="top",
         fontsize=8, color="#151212")
 
 ax.set_xlabel("Sparsity (%)")
-ax.set_ylabel("Average ADE")
-ax.set_title("Average ADE vs Sparsity - nvfp4")
+ax.set_ylabel("ADE")
+ax.set_title("Average Displacement Error (ADE) vs Sparsity - bf16 ")
 ax.grid(True, alpha=0.3)
 ax.legend(fontsize=8)
-finish(fig, "avg_ade_vs_sparsity.png")
+finish(fig, "avg_ade_vs_sparsity_bf16.png")
  
 # Print the raw numbers too
-print("\n  Average ADE per run:")
-for n, s, m in zip(run_names, sparsities, mean_ades):
-    print(f"    sparsity {s:>3}%  ->  mean ADE = {m:.4f}")
+print("\n Average Displacement Error per run:")
+for n, s, m in zip(run_names, sparsities, ades):
+    print(f"    sparsity {s:>3}%  ->  ADE = {m:.4f}")
+
+# ── PLOT 1.2: SPARSITY vs  MEDIAN DiSPLACEMENT ERROR ───────────────────────────────────────────
+sparsities = np.array([sparsity_from_name(n) for n in run_names])
+median_DE  = np.array([runs[n]["ADE"].median() for n in run_names])
+ 
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.plot(sparsities, median_DE, "-", color="#888888", zorder=1)  # trend line
+ax.scatter(sparsities, median_DE, color=CUSTOM_COLOURS[3], s=70, zorder=2)
+ # one x-tick at every sparsity value that actually exists
+ax.set_xticks(sparsities)
+# annotate each point with its median DE
+for s, m in zip(sparsities, median_DE):
+    ax.annotate(f"{m:.3f}",
+                xy=(s, m),
+                xytext=(0, 8),               # 8 points above the marker
+                textcoords="offset points",
+                ha="center", fontsize=8)
+    
+ax.text(0.5, 0.95, "*value above each point is Media DE",
+        transform=ax.transAxes, ha="right", va="top",
+        fontsize=8, color="#151212")
+
+ax.set_xlabel("Sparsity (%)")
+ax.set_ylabel("Median DE")
+ax.set_title("Median Displacement Error vs Sparsity - bf16 ")
+ax.grid(True, alpha=0.3)
+ax.legend(fontsize=8)
+finish(fig, "median_DE_vs_sparsity_bf16.png")
+ 
+# Print the raw numbers too
+print("\n  Median Displacement error per run:")
+for n, s, m in zip(run_names, sparsities, median_DE):
+    print(f"    sparsity {s:>3}%  ->  Median DE = {m:.4f}")
 
 
 # ── PLOT 2: PER-CLIP ADE — non-sparse (baseline) vs sparse ────────────────────
@@ -152,7 +185,7 @@ else:
         fig, ax = plt.subplots(figsize=(7, 7))
         ax.scatter(merged["ADE_base"], merged["ADE_sparse"],
                    s=25, alpha=0.6,
-                   color=CUSTOM_COLOURS[4])
+                   color=CUSTOM_COLOURS[3])
 
         # y = x reference line, sized to this plot's data
         lo = min(merged["ADE_base"].min(), merged["ADE_sparse"].min())
@@ -165,7 +198,7 @@ else:
         pct = sparsity_from_name(name)
         ax.set_xlabel(f"ADE - non-sparse baseline ({base_pct}%)")
         ax.set_ylabel(f"ADE - {pct}% sparse")
-        ax.set_title(f"{pct}% sparse vs non-sparse - nvfp4")
+        ax.set_title(f"{pct}% sparse vs non-sparse - bf16 ")
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
@@ -178,18 +211,18 @@ else:
             fontsize=10,
             bbox=dict(facecolor="white", alpha=0.8, edgecolor="none")
         )
-        finish(fig, f"per_clip_ade_{pct}_vs_baseline.png")
+        finish(fig, f"per_clip_ade_{pct}_vs_baseline_bf16.png")
    
    # -------- Sparisty vs correlation ------
     fig, ax = plt.subplots(figsize=(7, 7))
     corr_df = pd.DataFrame(correlation_results)
 
     ax.plot(corr_df["sparsity"], corr_df["pearson_correlation"], "-", color="#888888", zorder=1)  # trend line
-    ax.scatter(corr_df["sparsity"], corr_df["pearson_correlation"],s=25, alpha=1, color=CUSTOM_COLOURS[4])
+    ax.scatter(corr_df["sparsity"], corr_df["pearson_correlation"],s=25, alpha=1, color=CUSTOM_COLOURS[3])
 
     ax.set_xlabel(f"Sparsity amount (%)")
     ax.set_ylabel(f"Correlation Coefficient")
-    ax.set_title(f"Correlation Coefficient vs Sparsity - nvfp4")
+    ax.set_title(f"Correlation Coefficient vs Sparsity - bf16 ")
     ax.set_xticks(corr_df["sparsity"])
 
     min_spacing = 0.005  # minimum correlation difference between ticks
@@ -201,7 +234,7 @@ else:
 
     ax.set_yticks(y_ticks)
 
-    finish(fig, f"correlation_vs_sparsity_nvfp4.png")
+    finish(fig, f"correlation_vs_sparsity_bf16.png")
     
     # save correlation data
     corr_path = os.path.join(
