@@ -1,0 +1,108 @@
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/nvtx_sum.py]... 
+
+ ** NVTX Range Summary (nvtx_sum):
+
+ Time (%)  Total Time (ns)  Instances    Avg (ns)       Med (ns)      Min (ns)     Max (ns)    StdDev (ns)   Style                    Range                  
+ --------  ---------------  ---------  -------------  -------------  -----------  -----------  -----------  -------  ----------------------------------------
+     38.4      197,723,397          1  197,723,397.0  197,723,397.0  197,723,397  197,723,397          0.0  PushPop  :custom dense col gemv                  
+     26.9      138,554,081      1,100      125,958.3        1,550.0        1,492  136,794,832  4,124,471.1  PushPop  cuBLAS:cublasLtTSTMatmulAlgoGetHeuristic
+     12.9       66,515,106          1   66,515,106.0   66,515,106.0   66,515,106   66,515,106          0.0  PushPop  :Sparse top-k + GEMV                    
+      8.2       42,161,722          1   42,161,722.0   42,161,722.0   42,161,722   42,161,722          0.0  PushPop  :PyTorch dense linear                   
+      8.1       41,897,128          1   41,897,128.0   41,897,128.0   41,897,128   41,897,128          0.0  PushPop  :CUTLASS dense GEMV                     
+      3.9       20,122,781          1   20,122,781.0   20,122,781.0   20,122,781   20,122,781          0.0  PushPop  cuBLAS:cublasCreate_v2                  
+      1.6        8,299,261      1,100        7,544.8        7,335.0        6,907       51,346      1,696.3  PushPop  cuBLAS:cublasLtTSTMatmul                
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/osrt_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain OS Runtime trace data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls    Avg (ns)      Med (ns)    Min (ns)    Max (ns)    StdDev (ns)             Name          
+ --------  ---------------  ---------  ------------  ------------  ---------  -----------  ------------  ------------------------
+     50.9      227,630,312          4  56,907,578.0  21,039,138.0      4,339  185,547,697  86,332,219.2  cudaEventSynchronize    
+     25.9      116,031,255     11,021      10,528.2       3,835.0      2,944   24,923,103     335,132.9  cudaLaunchKernel        
+     14.9       66,502,983         10   6,650,298.3   6,518,003.5    173,407   16,965,302   4,744,198.3  cuLibraryLoadData       
+      5.1       22,690,171          4   5,672,542.8   2,087,905.0      5,847   18,508,514   8,613,759.8  cudaDeviceSynchronize   
+      2.4       10,819,538          2   5,409,769.0   5,409,769.0  5,359,519    5,460,019      71,064.2  cudaGetDeviceProperties 
+      0.4        1,842,594          1   1,842,594.0   1,842,594.0  1,842,594    1,842,594           0.0  cudaFree                
+      0.4        1,680,352         19      88,439.6      86,141.0      3,050      175,419      43,004.1  cudaMalloc              
+      0.0          166,207        838         198.3         158.0        111        1,780         116.2  cuGetProcAddress_v2     
+      0.0           63,682         52       1,224.7         837.0        292       15,627       2,104.4  cudaStreamIsCapturing   
+      0.0           47,116          8       5,889.5       5,399.0      4,466        9,022       1,586.5  cudaEventRecordWithFlags
+      0.0           43,967         10       4,396.7       5,147.5        309        6,782       2,226.8  cuLibraryGetKernel      
+      0.0           41,939         26       1,613.0         371.5        310        7,021       1,822.2  cudaEventCreateWithFlags
+      0.0            9,035          4       2,258.8       2,330.0      1,750        2,625         383.5  cuInit                  
+      0.0            7,955          8         994.4         873.0        439        1,705         591.5  cudaEventQuery          
+      0.0            7,402          8         925.3         813.5        483        1,526         461.0  cudaEventDestroy        
+      0.0            2,660          3         886.7         167.0        128        2,365       1,280.4  cuModuleGetLoadingMode  
+      0.0            1,787          2         893.5         893.5        343        1,444         778.5  cudaGetDriverEntryPoint 
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)                                                  Name                                                
+ --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
+     63.4      217,174,378      1,100  197,431.3  197,379.0   194,275   214,115      1,245.8  <unnamed>::dense_column_gemv_bf16(const __nv_bfloat16 *, const __nv_bfloat16 *, __nv_bfloat16 *, in…
+     13.4       45,963,543      1,100   41,785.0   41,760.0    24,480    43,713        578.6  std::enable_if<!T7, void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __n…
+     13.1       44,976,843      1,100   40,888.0   40,864.0    40,416    42,689        237.3  void cutlass::Kernel<cutlass::gemm::kernel::Gemv<cutlass::bfloat16_t, cutlass::layout::RowMajor, cu…
+      3.9       13,390,710      1,100   12,173.4   12,288.0    11,296    14,784        412.6  void at::native::sbtopk::gatherTopK<c10::BFloat16, unsigned int, (int)1, (bool)0>(at::cuda::detail:…
+      3.8       13,114,184      1,100   11,922.0   11,872.5     6,336    19,136        505.0  <unnamed>::indexed_sparse_gemv_bf16(const __nv_bfloat16 *, const __nv_bfloat16 *, const long *, flo…
+      0.9        3,250,523      1,100    2,955.0    2,944.0     2,912     3,456         23.8  void at::native::_scatter_gather_elementwise_kernel<(int)128, (int)8, void at::native::_cuda_scatte…
+      0.6        2,104,605          7  300,657.9  299,972.0   290,532   308,740      6,563.6  void at::native::elementwise_kernel<(int)128, (int)4, void at::native::gpu_kernel_impl_nocast<at::n…
+      0.2          833,419      1,100      757.7      832.0       576     1,152        131.4  void at::native::vectorized_elementwise_kernel<(int)4, at::native::AbsFunctor<c10::BFloat16>, std::…
+      0.2          675,496      1,100      614.1      608.0       608       672         12.6  void at::native::vectorized_elementwise_kernel<(int)4, at::native::bfloat16_copy_kernel_cuda(at::Te…
+      0.1          499,557      1,100      454.1      448.0       448       481         12.6  void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<float>, std::array<c…
+      0.1          489,542      1,100      445.0      448.0       416       576         12.5  void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<c10::BFloat16>, std:…
+      0.1          277,475         14   19,819.6   17,344.0       896    42,273     19,749.3  void at::native::<unnamed>::distribution_elementwise_grid_stride_kernel<float, (int)4, void at::nat…
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_mem_time_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain GPU memory data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_mem_size_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain GPU memory data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/openmp_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain OpenMP event data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/opengl_khr_range_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain KHR Extension (KHR_DEBUG) data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/opengl_khr_gpu_range_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain GPU KHR Extension (KHR_DEBUG) data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/vulkan_marker_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain Vulkan Debug Extension (Vulkan Debug Util) data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/vulkan_gpu_marker_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain GPU Vulkan Debug Extension (GPU Vulkan Debug markers) data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx11_pix_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain DX11 CPU debug markers.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx12_gpu_marker_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain DX12 GPU debug markers.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx12_pix_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain DX12 CPU debug markers.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/wddm_queue_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain WDDM context data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain CUDA memory transfers data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_total_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain CUDA memory transfers data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_cpu_page_faults_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/openacc_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain OpenACC event data.
+
+Processing [gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/syscall_sum.py]... 
+SKIPPED: gemv_report_aug18.sqlite does not contain syscall data.
+

@@ -1,0 +1,93 @@
+Generating SQLite file sparse_only_gemv_report_aug18.sqlite from sparse_only_gemv_report_aug18.nsys-rep
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/nvtx_sum.py]... 
+
+ ** NVTX Range Summary (nvtx_sum):
+
+ Time (%)  Total Time (ns)  Instances    Avg (ns)      Med (ns)     Min (ns)    Max (ns)   StdDev (ns)   Style          Range        
+ --------  ---------------  ---------  ------------  ------------  ----------  ----------  -----------  -------  --------------------
+    100.0       66,178,959          1  66,178,959.0  66,178,959.0  66,178,959  66,178,959          0.0  PushPop  :Sparse top-k + GEMV
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/osrt_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain OS Runtime trace data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls   Avg (ns)     Med (ns)    Min (ns)    Max (ns)   StdDev (ns)            Name          
+ --------  ---------------  ---------  -----------  -----------  ---------  ----------  -----------  ------------------------
+     88.2       93,982,282      6,621     14,194.6      3,708.0      2,972  24,759,411    418,991.7  cudaLaunchKernel        
+     10.3       10,991,537          2  5,495,768.5  5,495,768.5  5,351,406   5,640,131    204,159.4  cudaGetDeviceProperties 
+      1.4        1,489,442         15     99,296.1    104,146.0     54,090     220,557     45,430.4  cudaMalloc              
+      0.1           57,061         45      1,268.0        759.0        279      15,935      2,320.3  cudaStreamIsCapturing   
+      0.0           12,850          2      6,425.0      6,425.0      2,876       9,974      5,019.0  cudaEventCreateWithFlags
+      0.0           12,058          2      6,029.0      6,029.0      4,220       7,838      2,558.3  cudaEventRecordWithFlags
+      0.0            6,527          1      6,527.0      6,527.0      6,527       6,527          0.0  cudaDeviceSynchronize   
+      0.0            4,090          1      4,090.0      4,090.0      4,090       4,090          0.0  cudaEventSynchronize    
+      0.0            1,886          2        943.0        943.0        474       1,412        663.3  cudaEventQuery          
+      0.0            1,745          1      1,745.0      1,745.0      1,745       1,745          0.0  cuModuleGetLoadingMode  
+      0.0            1,718          2        859.0        859.0        483       1,235        531.7  cudaEventDestroy        
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)                                                  Name                                                
+ --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
+     39.2       13,373,427      1,100   12,157.7   12,257.0    11,264    14,816        413.5  void at::native::sbtopk::gatherTopK<c10::BFloat16, unsigned int, (int)1, (bool)0>(at::cuda::detail:…
+     38.4       13,103,153      1,100   11,912.0   11,872.0     6,336    18,304        538.4  <unnamed>::indexed_sparse_gemv_bf16(const __nv_bfloat16 *, const __nv_bfloat16 *, const long *, flo…
+      9.5        3,247,130      1,100    2,951.9    2,944.0     2,912     3,808         31.5  void at::native::_scatter_gather_elementwise_kernel<(int)128, (int)8, void at::native::_cuda_scatte…
+      6.2        2,104,248          7  300,606.9  299,811.0   290,915   308,292      6,344.1  void at::native::elementwise_kernel<(int)128, (int)4, void at::native::gpu_kernel_impl_nocast<at::n…
+      2.4          831,172      1,100      755.6      832.0       576     1,088        129.1  void at::native::vectorized_elementwise_kernel<(int)4, at::native::AbsFunctor<c10::BFloat16>, std::…
+      2.0          675,020      1,100      613.7      608.0       576       672         12.6  void at::native::vectorized_elementwise_kernel<(int)4, at::native::bfloat16_copy_kernel_cuda(at::Te…
+      1.5          501,354      1,100      455.8      448.0       448       576         14.1  void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<float>, std::array<c…
+      0.8          275,842         14   19,703.0   17,248.5       864    41,120     19,616.7  void at::native::<unnamed>::distribution_elementwise_grid_stride_kernel<float, (int)4, void at::nat…
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_mem_time_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain GPU memory data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_mem_size_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain GPU memory data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/openmp_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain OpenMP event data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/opengl_khr_range_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain KHR Extension (KHR_DEBUG) data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/opengl_khr_gpu_range_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain GPU KHR Extension (KHR_DEBUG) data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/vulkan_marker_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain Vulkan Debug Extension (Vulkan Debug Util) data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/vulkan_gpu_marker_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain GPU Vulkan Debug Extension (GPU Vulkan Debug markers) data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx11_pix_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain DX11 CPU debug markers.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx12_gpu_marker_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain DX12 GPU debug markers.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx12_pix_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain DX12 CPU debug markers.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/wddm_queue_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain WDDM context data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain CUDA memory transfers data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_total_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain CUDA memory transfers data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_cpu_page_faults_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/openacc_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain OpenACC event data.
+
+Processing [sparse_only_gemv_report_aug18.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/syscall_sum.py]... 
+SKIPPED: sparse_only_gemv_report_aug18.sqlite does not contain syscall data.
+

@@ -1,0 +1,116 @@
+Generating SQLite file aug20_rough_topk_sparse80_gemv_report.sqlite from aug20_rough_topk_sparse80_gemv_report.nsys-rep
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/nvtx_sum.py]... 
+
+ ** NVTX Range Summary (nvtx_sum):
+
+ Time (%)  Total Time (ns)  Instances    Avg (ns)       Med (ns)      Min (ns)     Max (ns)    StdDev (ns)   Style                Range             
+ --------  ---------------  ---------  -------------  -------------  -----------  -----------  -----------  -------  -------------------------------
+     91.1      290,734,715          1  290,734,715.0  290,734,715.0  290,734,715  290,734,715          0.0  PushPop  :Sparse top-k + GEMV           
+      4.6       14,665,928      1,100       13,332.7       12,986.0       12,414      115,753      3,404.3  PushPop  CCCL:cub::DeviceSelect::Flagged
+      4.3       13,569,815      1,100       12,336.2        8,442.0        7,960    4,032,645    121,334.2  PushPop  CCCL:cub::DeviceReduce::Sum    
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/osrt_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain OS Runtime trace data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_api_sum.py]... 
+
+ ** CUDA API Summary (cuda_api_sum):
+
+ Time (%)  Total Time (ns)  Num Calls   Avg (ns)     Med (ns)    Min (ns)    Max (ns)   StdDev (ns)            Name          
+ --------  ---------------  ---------  -----------  -----------  ---------  ----------  -----------  ------------------------
+     36.5      102,127,249     11,021      9,266.6      3,937.0      2,982  27,132,177    303,451.9  cudaLaunchKernel        
+     29.7       83,318,942      4,415     18,871.8      2,663.0      2,000     148,670     27,979.2  cudaMalloc              
+     22.0       61,568,322      4,400     13,992.8      4,936.0      2,065      71,235     17,928.2  cudaFree                
+      4.9       13,656,973          2  6,828,486.5  6,828,486.5  6,047,068   7,609,905  1,105,092.6  cudaGetDeviceProperties 
+      2.8        7,799,312      1,100      7,090.3      6,943.0      6,472      17,634        906.3  cudaMemcpyAsync         
+      2.8        7,784,373      2,200      3,538.4      4,630.5      1,830      20,928      1,603.4  cudaMemset              
+      1.0        2,764,318      1,100      2,513.0      2,388.5      2,059      17,927        844.9  cudaStreamSynchronize   
+      0.4        1,088,165          1  1,088,165.0  1,088,165.0  1,088,165   1,088,165          0.0  cudaHostAlloc           
+      0.0           39,517         45        878.2        535.0        284      10,543      1,537.1  cudaStreamIsCapturing   
+      0.0           13,451          2      6,725.5      6,725.5      5,974       7,477      1,062.8  cudaEventRecordWithFlags
+      0.0            6,386          2      3,193.0      3,193.0      2,829       3,557        514.8  cudaEventCreateWithFlags
+      0.0            4,642          1      4,642.0      4,642.0      4,642       4,642          0.0  cudaDeviceSynchronize   
+      0.0            2,992          1      2,992.0      2,992.0      2,992       2,992          0.0  cudaEventSynchronize    
+      0.0            2,107          1      2,107.0      2,107.0      2,107       2,107          0.0  cuModuleGetLoadingMode  
+      0.0            1,687          2        843.5        843.5        501       1,186        484.4  cudaEventDestroy        
+      0.0            1,655          2        827.5        827.5        462       1,193        516.9  cudaEventQuery          
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_kern_sum.py]... 
+
+ ** CUDA GPU Kernel Summary (cuda_gpu_kern_sum):
+
+ Time (%)  Total Time (ns)  Instances  Avg (ns)   Med (ns)   Min (ns)  Max (ns)  StdDev (ns)                                                  Name                                                
+ --------  ---------------  ---------  ---------  ---------  --------  --------  -----------  ----------------------------------------------------------------------------------------------------
+     44.2       13,459,581      1,100   12,236.0   12,192.0     7,360    18,368        527.9  <unnamed>::indexed_sparse_gemv_bf16(const __nv_bfloat16 *, const __nv_bfloat16 *, const long *, flo…
+     17.7        5,397,901      1,100    4,907.2    4,896.0     4,864     4,929         16.6  rough_topk_find_exponent_cutoff(const int *, int, int *, int *)                                     
+     10.2        3,119,864      1,100    2,836.2    2,848.0     2,784     4,064         42.0  void at::native::_scatter_gather_elementwise_kernel<(int)128, (int)8, void at::native::_cuda_scatte…
+      6.9        2,104,271          7  300,610.1  300,290.0   290,082   308,963      6,637.0  void at::native::elementwise_kernel<(int)128, (int)4, void at::native::gpu_kernel_impl_nocast<at::n…
+      4.6        1,410,285      1,100    1,282.1    1,280.0     1,248     1,408         15.2  void at_cuda_detail::cub::DeviceSelectSweepKernel<at_cuda_detail::cub::detail::device_select_policy…
+      3.8        1,151,718      1,100    1,047.0    1,056.0     1,024     1,280         17.7  void at_cuda_detail::cub::DeviceReduceSingleTileKernel<at_cuda_detail::cub::DeviceReducePolicy<int,…
+      3.1          957,673      1,100      870.6      896.0       640     1,248        116.1  rough_topk_create_histogram(const __nv_bfloat16 *, int, int, int *)                                 
+      2.9          883,332      1,100      803.0      800.0       768     1,184         17.1  rough_topk_build_mask(const __nv_bfloat16 *, int, const int *, const int *, int *, unsigned char *) 
+      2.3          704,585      1,100      640.5      640.0       608       673         10.1  void at::native::vectorized_elementwise_kernel<(int)4, at::native::bfloat16_copy_kernel_cuda(at::Te…
+      1.7          521,317      1,100      473.9      480.0       448       544         13.4  void at::native::vectorized_elementwise_kernel<(int)4, at::native::FillFunctor<float>, std::array<c…
+      1.6          487,523      1,100      443.2      448.0       416       544         12.2  void at_cuda_detail::cub::DeviceCompactInitKernel<at_cuda_detail::cub::ScanTileState<int, (bool)1>,…
+      0.9          276,674         14   19,762.4   17,264.0       896    41,249     19,649.1  void at::native::<unnamed>::distribution_elementwise_grid_stride_kernel<float, (int)4, void at::nat…
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_mem_time_sum.py]... 
+
+ ** CUDA GPU MemOps Summary (by Time) (cuda_gpu_mem_time_sum):
+
+ Time (%)  Total Time (ns)  Count  Avg (ns)  Med (ns)  Min (ns)  Max (ns)  StdDev (ns)           Operation          
+ --------  ---------------  -----  --------  --------  --------  --------  -----------  ----------------------------
+     68.5          712,774  2,200     324.0     304.5       224       544         83.2  [CUDA memset]               
+     31.5          327,717  1,100     297.9     288.0       288     1,184         30.6  [CUDA memcpy Device-to-Host]
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/cuda_gpu_mem_size_sum.py]... 
+
+ ** CUDA GPU MemOps Summary (by Size) (cuda_gpu_mem_size_sum):
+
+ Total (MB)  Count  Avg (MB)  Med (MB)  Min (MB)  Max (MB)  StdDev (MB)           Operation          
+ ----------  -----  --------  --------  --------  --------  -----------  ----------------------------
+      1.131  2,200     0.001     0.001     0.000     0.001        0.001  [CUDA memset]               
+      0.004  1,100     0.000     0.000     0.000     0.000        0.000  [CUDA memcpy Device-to-Host]
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/openmp_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain OpenMP event data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/opengl_khr_range_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain KHR Extension (KHR_DEBUG) data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/opengl_khr_gpu_range_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain GPU KHR Extension (KHR_DEBUG) data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/vulkan_marker_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain Vulkan Debug Extension (Vulkan Debug Util) data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/vulkan_gpu_marker_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain GPU Vulkan Debug Extension (GPU Vulkan Debug markers) data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx11_pix_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain DX11 CPU debug markers.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx12_gpu_marker_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain DX12 GPU debug markers.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/dx12_pix_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain DX12 CPU debug markers.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/wddm_queue_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain WDDM context data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_total_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/um_cpu_page_faults_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain CUDA Unified Memory CPU page faults data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/openacc_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain OpenACC event data.
+
+Processing [aug20_rough_topk_sparse80_gemv_report.sqlite] with [/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/reports/syscall_sum.py]... 
+SKIPPED: aug20_rough_topk_sparse80_gemv_report.sqlite does not contain syscall data.
+
