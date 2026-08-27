@@ -3,7 +3,8 @@
 
 # except these
 !.gitignore
-!./gemvCUTLASS
+!/gemvCUTLASS/
+!/gemvCUTLASS/**
 !compare_minade.py
 !compare_sparse_runs.py
 !harness.cu
