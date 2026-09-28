@@ -8,8 +8,8 @@ setup(
     name="gemv_cutlass_topk_ext",
     ext_modules=[CUDAExtension(
         name="gemv_cutlass_topk_ext",
-        sources=["gemv_cutlass_topk_ext.cu"],
-        include_dirs=["include", f"{CUTLASS_ROOT}/include"],
+        sources=["cutlass_library_cuda_files/gemv_cutlass_topk_ext.cu"],
+        include_dirs=[os.path.abspath("include"), f"{CUTLASS_ROOT}/include"],
         extra_compile_args={
             "nvcc": ["-arch=sm_120", "-std=c++17", "-O3", "--expt-relaxed-constexpr"],
             "cxx": ["-std=c++17", "-O3"],

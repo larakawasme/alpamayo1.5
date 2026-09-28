@@ -249,7 +249,7 @@ void launch_rough_topk(
     // auto above_count = torch::empty({1}, options);
 
 
-    auto workspace = torch::empty({256}, options.dtype(torch::kInt32));
+    auto workspace = torch::empty({260}, options.dtype(torch::kInt32));
     int *workspace_ptr = workspace.data_ptr<int>();
     int* d_histogram = workspace_ptr;
     int *d_cutoff_exp = workspace_ptr + 256;

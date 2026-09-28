@@ -2,13 +2,13 @@ import argparse
 
 import torch
 
-import gemv_ext
-import gemv_sparse_ext
-import gemv_dense_col_ext
-import gemv_cutlass_col_ext
+#import gemv_cutlass_rowmajor_ext
+import rough_topk_sparse_gemv
+import gemv_dense_colmajor
+#mport gemv_cutlass_colmajor_ext
 import gemv_sparse_no_colision_splitk
-import gemv_sparse_ext_no_malloc
-import gemv_sparse_extt_true_topk
+import rough_topk_sparse_gemv_improved
+import exact_topk_sparse_gemv_v3
 import gemv_standalone_ext
 
 from pathlib import Path
@@ -87,7 +87,7 @@ def time_cuda(fn, warmup, iterations):
 
 def check_sparse_gemv(weight, weight_col_major, activation, keep_count, split_k=4):
     pytorch_output = torch.nn.functional.linear(activation, weight)
-    sparse_gemv_output = gemv_sparse_ext.gemv(
+    sparse_gemv_output = rough_topk_sparse_gemv.gemv(
         weight_col_major,
         activation,
         keep_count,
@@ -136,14 +136,14 @@ amount_to_keep = int(args.k * (1 -  args.sparse_level))
 check_sparse_gemv(weights[0], weights_col_major[0], activation_vectors[0], amount_to_keep)
 functions = {
     "PyTorch dense linear": lambda i: torch.nn.functional.linear(activation_vectors[i % number_of_weights], weights[i % number_of_weights]),
-    #"CUTLASS dense GEMV": lambda i: gemv_ext.gemv(weights[i % number_of_weights], activation_vectors[i % number_of_weights]),
-    #"CUTLASS column GEMV": lambda i: gemv_cutlass_col_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights]),
-    #"Rough top-k + sparse GEMV many mallocs": lambda i: gemv_sparse_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ),
-    "Rough top-k + sparse GEMV": lambda i: gemv_sparse_ext_no_malloc.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ), #more efficient
-    "Standalone kernels + PyTorch binding": lambda i: gemv_standalone_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ),
-    "True topk + sparse GEMV":  lambda i: gemv_sparse_extt_true_topk.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 )
+    #"CUTLASS dense GEMV": lambda i: gemv_cutlass_rowmajor_ext.gemv(weights[i % number_of_weights], activation_vectors[i % number_of_weights]),
+    #"CUTLASS column GEMV": lambda i: gemv_cutlass_colmajor_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights]),
+    #"Rough top-k + sparse GEMV many mallocs": lambda i: rough_topk_sparse_gemv.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ),
+    "Rough top-k + sparse GEMV": lambda i: rough_topk_sparse_gemv_improved.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ), #more efficient
+    #"Standalone kernels + PyTorch binding": lambda i: gemv_standalone_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ),
+    "True topk + sparse GEMV":  lambda i: exact_topk_sparse_gemv_v3.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 )
     #"Sparse top-k + GEMV, splitk minimize collision": lambda i: gemv_sparse_no_colision_splitk.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 )
-    #"custom dense col gemv": lambda i: gemv_dense_col_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights])
+    #"custom dense col gemv": lambda i: gemv_dense_colmajor.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights])
 }
 
 print(f"shape: M={args.m}, K={args.k}, batch={args.batch}, sparsity level={args.sparse_level}")

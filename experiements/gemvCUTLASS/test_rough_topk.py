@@ -1,6 +1,6 @@
 import torch
 
-import gemv_sparse_ext
+import rough_topk_sparse_gemv
 
 
 @torch.no_grad()
@@ -23,7 +23,7 @@ def main():
     weight = torch.eye(4, device=device, dtype=dtype)
     weight_col_major = weight.T.contiguous()
 
-    rough_output = gemv_sparse_ext.gemv(
+    rough_output = rough_topk_sparse_gemv.gemv(
         weight_col_major, x, keep_count, 1
     )
 

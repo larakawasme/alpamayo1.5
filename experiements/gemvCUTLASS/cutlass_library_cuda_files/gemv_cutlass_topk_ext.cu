@@ -1,3 +1,5 @@
+//uses gemv kernel from CUTLASS with true topk from torch library
+
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>

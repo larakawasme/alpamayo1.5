@@ -3,11 +3,11 @@ from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 
 setup(
-    name="gemv_sparse_ext",
+    name="rough_topk_sparse_gemv",
     ext_modules=[    
         CUDAExtension(
-            name="gemv_sparse_ext",
-            sources=["cutlass_library_cuda_files/gemv_cutlass_rowmajor_ext.cu"],
+            name="rough_topk_sparse_gemv",
+            sources=["rough_topk_sparse_gemv.cu"],
             extra_compile_args={
                 "nvcc": ["-arch=sm_120", "-std=c++17", "-O3"],
                 "cxx": ["-std=c++17", "-O3"],
@@ -31,16 +31,16 @@ setup(
             },
         ),
         CUDAExtension(
-            name="gemv_sparse_ext_rough_topk_improved",
-            sources=["gemv_sparse_ext_rough_topk_improved.cu"],
+            name="rough_topk_sparse_gemv_improved",
+            sources=["rough_topk_sparse_gemv_improved.cu"],
             extra_compile_args={
                 "nvcc": ["-arch=sm_120", "-std=c++17", "-O3"],
                 "cxx": ["-std=c++17", "-O3"],
             },
         ),
         CUDAExtension(
-            name="gemv_sparse_extt_true_topk",
-            sources=["gemv_sparse_extt_true_topk.cu"],
+            name="exact_topk_sparse_gemv_v3",
+            sources=["exact_topk_sparse_gemv_v3.cu"],
             extra_compile_args={
                 "nvcc": ["-arch=sm_120", "-std=c++17", "-O3"],
                 "cxx": ["-std=c++17", "-O3"],

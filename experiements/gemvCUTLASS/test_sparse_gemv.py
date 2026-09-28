@@ -1,6 +1,6 @@
 import torch
 
-import gemv_sparse_ext
+import rough_topk_sparse_gemv
 
 
 torch.manual_seed(0)
@@ -17,7 +17,7 @@ indices = x.abs().topk(keep_count, dim=-1).indices
 x_sparse = torch.zeros_like(x).scatter(-1, indices, x.gather(-1, indices))
 reference = torch.nn.functional.linear(x_sparse, weight)
 
-output = gemv_sparse_ext.gemv(weight_col, x, keep_count)
+output = rough_topk_sparse_gemv.gemv(weight_col, x, keep_count)
 max_diff = (reference - output).abs().max().item()
 
 print("output shape:", tuple(output.shape))

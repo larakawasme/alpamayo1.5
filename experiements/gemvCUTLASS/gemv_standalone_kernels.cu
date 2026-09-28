@@ -1,4 +1,5 @@
-//tested something here, NOT USING
+//same as rough_topk_sparse_gemv_improved but with some mods to work with gpgpusim. 
+//copied whole file just in case. will clean up soon
 
 // Sparse, column-oriented GEMV PyTorch extension.
 //
@@ -6,7 +7,8 @@
 // For each input vector, top-k is selected on the current CUDA stream, then the
 // CUDA kernel reads only weight_col_major[k, :] for those selected k indices.
 
-#include <torch/extension.h>
+#ifndef GEMV_STANDALONE
+#include <torch/torch.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -14,12 +16,34 @@
 #include <cuda_bf16.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#endif
+#include <cuda_runtime.h>
+#include <cuda_bf16.h>
 
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
+#include <exception>
 #include <tuple>
 
+// Give the standalone kernel external linkage so GPGPU-Sim loads its PTX body.
+#ifndef GEMV_STANDALONE
 namespace {
+#endif
+
+// CUDA 12.8 emits a packed mov with an immediate for __bfloat162float,
+// which this simulator's PTX parser does not accept. Widening and shifting
+// preserves the exact BF16 bit pattern, including signed zero and NaNs.
+__device__ __forceinline__ float gemv_bf16_to_float(__nv_bfloat16 value) {
+#ifdef GEMV_STANDALONE
+  unsigned bits;
+  asm("cvt.u32.u16 %0, %1;" : "=r"(bits) : "h"(__bfloat16_as_ushort(value)));
+  asm("shl.b32 %0, %0, 16;" : "+r"(bits));
+  return __uint_as_float(bits);
+#else
+  return __bfloat162float(value);
+#endif
+}
 
 constexpr int kThreads = 256;
 constexpr int topKChunkSize = 256; //how may topk values to processat once
@@ -63,8 +87,8 @@ __global__ void indexed_sparse_gemv_bf16(
       //#pragma unroll 4
       for (int j = 0; j < count; j++) {
         int64_t const activation_idx = selected_idx[j]; //get activation idx
-        float const activation_value_float = __bfloat162float(selected_x[j]); //convert activation vlaue to float for accumulation
-        float const w = __bfloat162float(weight_col_major[activation_idx * int64_t(M) + m]);
+        float const activation_value_float = gemv_bf16_to_float(selected_x[j]); //convert activation vlaue to float for accumulation
+        float const w = gemv_bf16_to_float(weight_col_major[activation_idx * int64_t(M) + m]);
         accumulator = fmaf(w, activation_value_float, accumulator);
       }
     }
@@ -76,7 +100,9 @@ __global__ void indexed_sparse_gemv_bf16(
   }
 }
 
+#ifndef GEMV_STANDALONE
 } // namespace
+#endif
 
 
 //rough topk, based off values of exponent bits
@@ -87,17 +113,25 @@ __global__ void rough_topk_create_histogram(
   const __nv_bfloat16* __restrict__ activation_vector,
   int K, //large dimension of vector
   int target_k,
-  int* __restrict__ global_histogram
+  int* __restrict__ global_histogram,
+  float* __restrict__ output,
+      int64_t output_numel
 ){
   //activation vector is [1,K]
   //each thread responsible for conevrting from bf16 form to just exponent form
   int tid = threadIdx.x;
   int idx_in_vector = blockIdx.x * blockDim.x + threadIdx.x; 
   __shared__ int local_hist[256];
+  int grid_stride = blockDim.x * gridDim.x;
   //initi block local histogram to 0
   if (tid < 256){
     local_hist[tid]=0;
   }
+
+  // Cooperatively zero the GEMV output.
+    for (int64_t i = idx_in_vector; i < output_numel; i+=grid_stride) {
+        output[i] = 0.0f;
+    }
 
   __syncthreads();
 
@@ -117,32 +151,6 @@ __global__ void rough_topk_create_histogram(
       atomicAdd(&global_histogram[tid], local_hist[tid]);
   }
 }
-
-//step2, find cutofff
-//oriiginal
-// __global__ void rough_topk_find_exponent_cutoff(
-//     const int* __restrict__ global_histogram,
-//     int target_k,
-//     int* __restrict__ cutoff_exp,
-//     int* __restrict__ needed_from_cutoff
-// ) {
-//   if (blockIdx.x == 0 && threadIdx.x == 0) {
-//     int cumulative = 0;
-//     for (int exp = 255; exp >= 0; --exp) {
-//         int next = cumulative + global_histogram[exp];
-
-//         if (next >= target_k) {
-//             *cutoff_exp = exp;
-
-//             // number still needed from this exponent bin
-//             *needed_from_cutoff = target_k - cumulative;
-//             return;
-//         }
-
-//         cumulative = next;
-//     }
-//   }
-// }
 
 #include <cuda_bf16.h>
 #include <cub/block/block_scan.cuh>
@@ -246,6 +254,7 @@ __global__ void rough_topk_collect(
     }
 }
 
+#ifndef GEMV_STANDALONE
 //wrapper for rough topk
 void launch_rough_topk(
     const __nv_bfloat16* activation_vector,
@@ -254,34 +263,48 @@ void launch_rough_topk(
     //uint8_t* d_mask,
     int64_t* output_indices, //new
     __nv_bfloat16* output_values, //new
-    cudaStream_t stream
+    float* final_output_vector,
+    int output_vector_len, 
+    const torch::TensorOptions& options,
+    c10::cuda::CUDAStream stream
 ) {
-  int threads = 256;
-  int blocks = (K + threads - 1) / threads;
+    int threads = 256;
+    int blocks = (K + threads - 1) / threads;
+    
+    // auto histogram = torch::empty({256}, options);
+    // auto cutoff_exp = torch::empty({1}, options);
+    // auto needed_from_cutoff = torch::empty({1}, options);
+    // auto cutoff_counter = torch::empty({1}, options);
+    // auto above_count = torch::empty({1}, options);
 
-    // device allocations
-    int* d_histogram;
-    int* d_cutoff_exp;
-    int* d_needed_from_cutoff;
-    int* d_cutoff_counter;
-    int* d_above_counter; //new
 
-    cudaMalloc(&d_histogram, 256 * sizeof(int));
-    cudaMalloc(&d_cutoff_exp, sizeof(int));
-    cudaMalloc(&d_needed_from_cutoff, sizeof(int));
-    cudaMalloc(&d_above_counter, sizeof(int)); // new
-    cudaMalloc(&d_cutoff_counter, sizeof(int));
+    auto workspace = torch::empty({260}, options.dtype(torch::kInt32));
+    int *workspace_ptr = workspace.data_ptr<int>();
+    int* d_histogram = workspace_ptr;
+    int *d_cutoff_exp = workspace_ptr + 256;
+    int *d_needed_from_cutoff =workspace_ptr + 257;
+    int *d_cutoff_counter = workspace_ptr + 258;
+    int *d_above_counter = workspace_ptr + 259;
 
-    cudaMemset(d_histogram, 0, 256 * sizeof(int));
-    cudaMemset(d_cutoff_counter, 0, sizeof(int));
-    cudaMemset(d_above_counter, 0, sizeof(int)); //new
+    C10_CUDA_CHECK(cudaMemsetAsync(
+      d_histogram,
+      0,
+      256 * sizeof(int),
+      stream.stream()));
 
+    C10_CUDA_CHECK(cudaMemsetAsync(
+        d_cutoff_counter,
+        0,
+        2 * sizeof(int),
+        stream.stream()));
 
     rough_topk_create_histogram<<<blocks, threads, 0, stream>>>(
         activation_vector,
         K,
         target_k,
-        d_histogram
+        d_histogram,
+        final_output_vector,
+        output_vector_len
     );
 
     
@@ -305,11 +328,10 @@ void launch_rough_topk(
         output_values //new
     );
 
-    cudaFree(d_histogram);
-    cudaFree(d_cutoff_exp);
-    cudaFree(d_needed_from_cutoff);
-    cudaFree(d_cutoff_counter);
-    cudaFree(d_above_counter); //new
+    c10::cuda::CUDACachingAllocator::recordStream(
+      workspace.storage().data_ptr(),
+      stream);
+
 }
 
 // returns:    [..., M]
@@ -343,9 +365,6 @@ torch::Tensor sparse_gemv(
   // std::cout << "x_flat: " << x_flat << std::endl;
   // std::cout << "x_flat shape: " << x_flat.sizes() << std::endl;
   c10::cuda::CUDAStream  primary_stream = at::cuda::getCurrentCUDAStream(); //ensure ordering
-  
-  //create secondary stream
-  static c10::cuda::CUDAStream  secondary_stream = at::cuda::getStreamFromPool(false, x.get_device());
 
   //alternaitve topk version 1
   // auto mask = torch::empty({K},x.options().dtype(torch::kUInt8));
@@ -361,8 +380,10 @@ torch::Tensor sparse_gemv(
 //aternative topk version2
   auto indices = torch::empty({keep_count},x.options().dtype(torch::kInt64));
   auto values = torch::empty({keep_count},x.options().dtype(torch::kBFloat16));
-  torch::Tensor output_f32;
-  
+  auto output_f32 = torch::empty({batch_count, M}, x.options().dtype(torch::kFloat32)); //32 bit output
+  //auto output_f32 = torch::zeros({batch_count, M}, x.options().dtype(torch::kFloat32)); //32 bit output
+
+  //int output_len = batch_count * M;
 
   launch_rough_topk(
     reinterpret_cast<const __nv_bfloat16*>(x_flat.data_ptr<at::BFloat16>()),
@@ -370,7 +391,10 @@ torch::Tensor sparse_gemv(
     static_cast<int>(keep_count),
     indices.data_ptr<int64_t>(),
     reinterpret_cast<__nv_bfloat16*>(values.data_ptr<at::BFloat16>()),
-    primary_stream.stream());
+    output_f32.data_ptr<float>(),
+    output_f32.numel(),
+    x.options(),
+    primary_stream);
     //END OF ALTERNAITVE TOPKVERSION2
   //START OF TOPK TRUE CODE
   // topk ranks by magnitude; gather recovers the original signed values.
@@ -383,24 +407,15 @@ torch::Tensor sparse_gemv(
 
   // auto values = x_flat.gather(1, indices).contiguous();
   //END OF TOPK TRUE CODE
-    at::cuda::CUDAEvent zeros_done;
-    {
-        // PyTorch operations in this scope use secondary_stream.
-        c10::cuda::CUDAStreamGuard stream_guard(secondary_stream);
-        output_f32 = torch::zeros({batch_count, M}, x.options().dtype(torch::kFloat32)); //32 bit output
+
   
-  
-        // Record after torch::zeros has queued its memset.
-        zeros_done.record(secondary_stream); //record event
-    }
-  
+
 
   dim3 const block(kThreads); // 1d block of kthreads
 
   //3d block where x is batch count and y is number of blocks for M outputs and z K splits
   dim3 const grid(static_cast<unsigned>(batch_count),static_cast<unsigned>((M + kThreads - 1) / kThreads), static_cast<unsigned>(split_k)); //kthreads=1 makes roud up
 
-  zeros_done.block(primary_stream); //wait for secondayr stream to be done
   //launch kernel
   indexed_sparse_gemv_bf16<<<grid, block, 0, primary_stream.stream()>>>(
       reinterpret_cast<__nv_bfloat16 const*>(weight_col_major.data_ptr<at::BFloat16>()),
@@ -416,9 +431,50 @@ torch::Tensor sparse_gemv(
   return output.reshape(output_shape);
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, module) {
-  module.def(
-      "gemv",
-      &sparse_gemv,
-      "Top-k indexed sparse GEMV with column-oriented BF16 weights");
+//small test for gpgpusim
+#ifndef GEMV_NO_MAIN
+int main() {
+  try {
+    torch::NoGradGuard no_grad;
+    c10::cuda::CUDAGuard device_guard(c10::Device(c10::kCUDA, 0));
+
+    constexpr int64_t K = 512;
+    constexpr int64_t M = 256;
+    constexpr int64_t keep_count = 32;
+    constexpr int64_t split_k = 2;
+
+    const auto cpu_options = torch::TensorOptions()
+                                 .device(torch::kCPU)
+                                 .dtype(torch::kBFloat16);
+    const torch::Device device(torch::kCUDA, 0);
+
+    // Already in the layout expected by sparse_gemv: [K, M].
+    auto weight_col_major = torch::ones({K, M}, cpu_options).to(device);
+    auto x = torch::ones({1, 1, K}, cpu_options).to(device);
+
+    auto output = sparse_gemv(weight_col_major, x, keep_count, split_k);
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    auto output_cpu = output.to(torch::kCPU).to(torch::kFloat32);
+
+    // Every selected value and weight is one, so any valid tie selection
+    // must produce keep_count for each output element.
+    const float expected = static_cast<float>(keep_count);
+    const float* result = output_cpu.data_ptr<float>();
+    for (int64_t m = 0; m < M; ++m) {
+      if (result[m] != expected) {
+        std::cerr << "FAIL at output " << m << ": expected " << expected
+                  << ", got " << result[m] << '\n';
+        return 1;
+      }
+    }
+    std::cout << "PASS: output shape " << output_cpu.sizes()
+              << ", all " << M << " elements equal " << expected << '\n';
+    return 0;
+  } catch (const std::exception& error) {
+    std::cerr << "GEMV test failed: " << error.what() << '\n';
+    return 1;
+  }
 }
+
+#endif // GEMV_NO_MAIN
+#endif // GEMV_STANDALONE
