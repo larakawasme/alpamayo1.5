@@ -4,7 +4,7 @@ import torch
 
 #import gemv_cutlass_rowmajor_ext
 import rough_topk_sparse_gemv
-import gemv_dense_colmajor
+#import gemv_dense_colmajor
 #mport gemv_cutlass_colmajor_ext
 import gemv_sparse_no_colision_splitk
 import rough_topk_sparse_gemv_improved
