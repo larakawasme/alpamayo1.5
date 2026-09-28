@@ -671,8 +671,8 @@ def ADE_across_all_clips(model, processor, out_dir):
     results = []
     try:
         for idx, clip_id in enumerate(clip_ids):
-            if idx > 600:
-                break
+            # if idx > 1:
+            #     break
             dequantize_count = 0
             print(f"\n[{idx+1}/{len(clip_ids)}] Processing clip: {clip_id}")
             # pred_xyz, gt_xy, extra = run_inference(clip_id, model, processor)

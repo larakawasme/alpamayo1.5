@@ -17,3 +17,6 @@
 !clearer_sparse_runs_comparison.py
 !compare_ade_across_two_runs.py
 !layer_analysis_fns.py
+!compare_sparse_runs_improved.py
+!compare_sparse_runs_old.py
+!analyze_saved_pruning.py

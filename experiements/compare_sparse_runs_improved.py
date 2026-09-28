@@ -19,15 +19,15 @@ from matplotlib.ticker import MultipleLocator
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
-DATA_FOLDER = "./sparsity_cublass_non_quant_experiements/sparse_rough_topk"          # <-- change this to your folder path
+DATA_FOLDER = "./sparsity_cublass_non_quant_experiements/00_sparsity_data/sparstiy_data_no_mag_scale"          # <-- change this to your folder path
 CSV_PATTERN = "*.csv"          # matches any .csv in that folder
-OUTPUT_DIR  = "./sparsity_cublass_non_quant_experiements/sparse_rough_topk/plots"        # where to save the figures (set None to just show)
+OUTPUT_DIR  = "./sparsity_cublass_non_quant_experiements/00_sparsity_data/sparstiy_data_no_mag_scale"        # where to save the figures (set None to just show)
 CUSTOM_COLOURS = [
     "#e6194b",  # red
     "#3cb44b",  # green
     "#4363d8",  # blue
     "#f58231",  # orange
-    "#911eb4",  # purpleR[4]
+    "#911eb4",  # purpleR[9]
     "#42d4f4",  # cyan
     "#f032e6",  # magenta
     "#bfef45",  # lime
@@ -94,7 +94,7 @@ ades  = np.array([runs[n]["ADE"].mean() for n in run_names])
  
 fig, ax = plt.subplots(figsize=(8, 5))
 ax.plot(sparsities, ades, "-", color="#888888", zorder=1)  # trend line
-ax.scatter(sparsities, ades, color=CUSTOM_COLOURS[3], s=70, zorder=2)
+ax.scatter(sparsities, ades, color=CUSTOM_COLOURS[9], s=70, zorder=2)
  # one x-tick at every sparsity value that actually exists
 ax.set_xticks(sparsities)
 # annotate each point with its ADE
@@ -127,7 +127,7 @@ median_DE  = np.array([runs[n]["ADE"].median() for n in run_names])
  
 fig, ax = plt.subplots(figsize=(8, 5))
 ax.plot(sparsities, median_DE, "-", color="#888888", zorder=1)  # trend line
-ax.scatter(sparsities, median_DE, color=CUSTOM_COLOURS[3], s=70, zorder=2)
+ax.scatter(sparsities, median_DE, color=CUSTOM_COLOURS[9], s=70, zorder=2)
  # one x-tick at every sparsity value that actually exists
 ax.set_xticks(sparsities)
 # annotate each point with its median DE
@@ -185,7 +185,7 @@ else:
         fig, ax = plt.subplots(figsize=(7, 7))
         ax.scatter(merged["ADE_base"], merged["ADE_sparse"],
                    s=25, alpha=0.6,
-                   color=CUSTOM_COLOURS[3])
+                   color=CUSTOM_COLOURS[9])
 
         # y = x reference line, sized to this plot's data
         lo = min(merged["ADE_base"].min(), merged["ADE_sparse"].min())
@@ -218,11 +218,12 @@ else:
     corr_df = pd.DataFrame(correlation_results)
 
     ax.plot(corr_df["sparsity"], corr_df["pearson_correlation"], "-", color="#888888", zorder=1)  # trend line
-    ax.scatter(corr_df["sparsity"], corr_df["pearson_correlation"],s=25, alpha=1, color=CUSTOM_COLOURS[3])
+    ax.scatter(corr_df["sparsity"], corr_df["pearson_correlation"],s=25, alpha=1, color=CUSTOM_COLOURS[9])
 
     ax.set_xlabel(f"Sparsity amount (%)")
     ax.set_ylabel(f"Correlation Coefficient")
     ax.set_title(f"Correlation Coefficient vs Sparsity - bf16 ")
+    ax.set_ylim(0.15, 1.0)
     ax.set_xticks(corr_df["sparsity"])
 
     min_spacing = 0.005  # minimum correlation difference between ticks
@@ -232,6 +233,8 @@ else:
         if not y_ticks or abs(corr - y_ticks[-1]) >= min_spacing:
             y_ticks.append(corr)
 
+    y_ticks.extend([0.1, 1.0])
+    y_ticks = sorted(y_ticks)
     ax.set_yticks(y_ticks)
 
     finish(fig, f"correlation_vs_sparsity_bf16.png")

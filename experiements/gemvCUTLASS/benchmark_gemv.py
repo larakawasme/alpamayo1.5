@@ -8,6 +8,9 @@ import gemv_dense_col_ext
 import gemv_cutlass_col_ext
 import gemv_sparse_no_colision_splitk
 import gemv_sparse_ext_no_malloc
+import gemv_sparse_extt_true_topk
+import gemv_standalone_ext
+
 from pathlib import Path
 
 output_dir = Path("benchmark_outputs")
@@ -76,6 +79,7 @@ def time_cuda(fn, warmup, iterations):
     with torch.cuda.nvtx.range(name):
         start.record() # record start
         for i in range(iterations):
+            #with torch.cuda.nvtx.range(f"{name}_{i}"):
             fn(i)
         end.record() # record end
         end.synchronize()
@@ -132,20 +136,21 @@ amount_to_keep = int(args.k * (1 -  args.sparse_level))
 check_sparse_gemv(weights[0], weights_col_major[0], activation_vectors[0], amount_to_keep)
 functions = {
     "PyTorch dense linear": lambda i: torch.nn.functional.linear(activation_vectors[i % number_of_weights], weights[i % number_of_weights]),
-    "CUTLASS dense GEMV": lambda i: gemv_ext.gemv(weights[i % number_of_weights], activation_vectors[i % number_of_weights]),
+    #"CUTLASS dense GEMV": lambda i: gemv_ext.gemv(weights[i % number_of_weights], activation_vectors[i % number_of_weights]),
     #"CUTLASS column GEMV": lambda i: gemv_cutlass_col_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights]),
-    "Sparse top-k + GEMV": lambda i: gemv_sparse_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ),
-     "Sparse top-k + GEMV no malloc": lambda i: gemv_sparse_ext_no_malloc.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 )
+    #"Rough top-k + sparse GEMV many mallocs": lambda i: gemv_sparse_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ),
+    "Rough top-k + sparse GEMV": lambda i: gemv_sparse_ext_no_malloc.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ), #more efficient
+    "Standalone kernels + PyTorch binding": lambda i: gemv_standalone_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 ),
+    "True topk + sparse GEMV":  lambda i: gemv_sparse_extt_true_topk.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 )
     #"Sparse top-k + GEMV, splitk minimize collision": lambda i: gemv_sparse_no_colision_splitk.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights], amount_to_keep,4 )
     #"custom dense col gemv": lambda i: gemv_dense_col_ext.gemv(weights_col_major[i % number_of_weights], activation_vectors[i % number_of_weights])
 }
-
 
 print(f"shape: M={args.m}, K={args.k}, batch={args.batch}, sparsity level={args.sparse_level}")
 print(f"number of columns kept: {amount_to_keep}")  
 for name, fn in functions.items():
     microseconds = time_cuda(fn, args.warmup, args.iterations)
-    print(f"{name:22s}: {microseconds:9.3f} us")
+    print(f"{name:50s}: {microseconds:9.3f} us")
 
 for name, fn in functions.items():
         for i in range(number_of_weights):
