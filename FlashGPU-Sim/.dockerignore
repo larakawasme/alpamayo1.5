@@ -1,0 +1,64 @@
+# Docker ignore file for FlashGPU-Sim
+
+# Git
+.git
+.gitignore
+.gitmodules
+
+# Build artifacts
+build/
+lib/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+
+# Test artifacts (can be regenerated)
+tests/gtest/
+tests/build/
+tests/run/
+tests/logs/
+tutorials/**/run/
+
+# Documentation build
+docs/legacy/doxygen/html/
+docs/legacy/doxygen/latex/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.eggs/
+
+# Coverage files
+*.gcda
+*.gcno
+*.gcov
+coverage/
+
+# Docker files (no need to copy these into the image)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Large unnecessary files
+*.tar
+*.tar.gz
+*.zip
+*.rar

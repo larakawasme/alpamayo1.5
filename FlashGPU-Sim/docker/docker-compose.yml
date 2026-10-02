@@ -1,0 +1,24 @@
+name: flashgpu-sim-dev
+
+services:
+  flashgpusim:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        DEV_UID: ${FLASHGPUSIM_UID:-1000}
+        DEV_GID: ${FLASHGPUSIM_GID:-1000}
+    image: flashgpu-sim-dev:cuda12.8
+    environment:
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-8}
+      TERM: ${TERM:-xterm-256color}
+    volumes:
+      - ..:/workspace/flashgpu-sim:rw
+      - flashgpusim-cache:/home/flashgpusim/.cache
+    working_dir: /workspace/flashgpu-sim
+    stdin_open: true
+    tty: true
+    init: true
+
+volumes:
+  flashgpusim-cache:
