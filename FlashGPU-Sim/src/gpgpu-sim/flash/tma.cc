@@ -511,6 +511,87 @@ cache_tensormap_descriptor(inst_t::tma_dyn_info_t &tma_dyn_info,
   tma_dyn_info.has_tensormap_descriptor = true;
 }
 
+//the 16 bytes after the 128 byte tensr descriptro
+// temporary C++ representation
+struct tma_sparse_extension_t {
+  uint32_t dimension = 0;
+  uint32_t reserved = 0;
+  uint64_t bitmap = 0;
+};
+
+static memory_space *resolve_descriptor_memory(uint64_t descriptor_address,
+                                               ptx_thread_info *thread,
+                                               unsigned num_dims) {
+  memory_space *memory = thread->get_global_memory();
+  if (descriptor_address < STATIC_ALLOC_LIMIT && thread->get_param_memory()) {
+    tensormap_descriptor_t candidate;
+    thread->get_param_memory()->read(descriptor_address, 128, &candidate);
+    if (is_valid_tensormap_for_dim(candidate, num_dims))
+      memory = thread->get_param_memory();
+  }
+  return memory;
+}
+
+static tma_sparse_extension_t read_sparse_extension(
+  memory_space *memory,
+  uint64_t descriptor_address
+){
+  uint8_t bytes[16] = {};
+  memory->read(descriptor_address + TENSORMAP_DESCRIPTOR_SIZE,
+               sizeof(bytes), bytes);
+  tma_sparse_extension_t extension;
+  memcpy(&extension.dimension, bytes, sizeof(extension.dimension));
+  memcpy(&extension.reserved, bytes + 4, sizeof(extension.reserved));
+  memcpy(&extension.bitmap, bytes + 8, sizeof(extension.bitmap));
+
+  return extension;
+}
+
+static tma_sparse_window_t capture_sparse_window(
+    const tensormap_descriptor_t &tm,
+    uint64_t descriptor_address,
+    const int32_t coords[5],
+    ptx_thread_info *thread
+  ){
+  tma_sparse_window_t result;
+  memory_space *descriptor_mem =
+      resolve_descriptor_memory(descriptor_address, thread, tm.num_dims());
+
+  if (!tm.has_sparse_extension())
+    // since dense tensor descriptor, return a sparse window that says sparsity is disabled.
+    return result;
+
+  tma_sparse_extension_t extension =
+      read_sparse_extension(descriptor_mem, descriptor_address);
+
+  result.enabled = true;
+  result.dimension = extension.dimension;
+
+  // Read the bitmap size from the global sparse dimension.
+
+  const uint64_t bitmap_bytes = (uint64_t(tm.fields.globalDim[extension.dimension]) + 7) / 8;
+
+  uint64_t last_block = UINT64_MAX;
+  std::vector<uint8_t> bitmap_block;
+  for (unsigned i = 0; i < tm.fields.boxDim[extension.dimension]; ++i) {
+    int64_t logical = int64_t(coords[extension.dimension]) + i; //where tma request starts along sparse dimension
+    if (logical < 0 || logical >= tm.fields.globalDim[extension.dimension])
+      continue;
+
+    uint64_t byte = uint64_t(logical) / 8;
+    uint64_t block_offset = (byte / 128) * 128;
+    if (block_offset != last_block) { // temprory before implementng cache
+      bitmap_block.resize(std::min<uint64_t>(128, bitmap_bytes - block_offset));
+      thread->get_global_memory()->read(extension.bitmap + block_offset,
+                                        bitmap_block.size(), bitmap_block.data());
+      last_block = block_offset;
+    }
+    result.active[i] =
+        (bitmap_block[byte - block_offset] >> (logical % 8)) & 1;
+  }
+  return result;
+}
+
 //=============================================================================
 // Performance Simulation: TMA AGU (Address Generation Unit)
 //=============================================================================
@@ -537,6 +618,9 @@ struct tma_agu_state_t {
   bool row_is_oob = false;            // Higher-dim OOB: entire row is fill
   uint32_t valid_row_start_bytes = 0; // First valid dim0 byte in the tile row
   uint32_t valid_row_end_bytes = 0;   // One-past-last valid dim0 byte
+
+  tma_sparse_window_t sparse;
+  std::bitset<128> request_active_bytes;
 
   // Linear mode state (simple 1D address range)
   uint64_t linear_addr = 0;      // Current address
@@ -697,6 +781,16 @@ public:
       uint32_t to_boundary =
           request_granularity - (out_addr % request_granularity);
       out_size = std::min({request_granularity, row_remaining, to_boundary});
+
+      state.request_active_bytes.reset();
+      for (unsigned b = 0; b < out_size; ++b) {
+        unsigned index = state.sparse.dimension == 0
+            ? (state.offset_in_row + b) / state.elem_size
+            : state.tile_coords[state.sparse.dimension];
+        // OOB retains the existing fill policy, independently of sparsity.
+        if (!state.sparse.enabled || state.is_fill_request ||
+            state.sparse.active[index]) state.request_active_bytes.set(b);
+      }
 
       // Advance position within row
       state.offset_in_row += out_size;
@@ -1236,6 +1330,9 @@ public:
             exit(1);
           }
           m_agu.init_tensor(tx.agu_state, tensormap, tma_dyn_info.coords);
+          if (!is_write_op) {
+            tx.agu_state.sparse = tma_dyn_info.sparse;
+          }
 
         } else {
           // For linear mode, AGU generates global memory addresses
@@ -1707,6 +1804,22 @@ public:
                                     request_granularity)) {
             made_progress = true;
 
+            unsigned selected_bytes = size;
+            if (tx.agu_state.sparse.enabled) {
+              selected_bytes = tx.agu_state.request_active_bytes.count();
+              unsigned skipped = size - selected_bytes;
+              tx.m_bytes_completed += skipped;
+              record_tma_bytes_completed(skipped);
+              if (selected_bytes == 0) {
+                if (tx.m_bytes_completed >= tx.m_dyn_info.size_in_bytes) {
+                  finalize_transaction(tx_uid);
+                  transaction_finalized = true;
+                  break;
+                }
+                continue;
+              }
+            }
+
             bool first_request = tx.m_mf_issued_count == 0;
             if (first_request) {
               GPPRINTF_TMA(TMA,
@@ -1747,14 +1860,18 @@ public:
 
             unsigned start_byte = addr % MAX_MEMORY_ACCESS_SIZE;
             for (unsigned i = 0; i < size; i++) {
-              byte_mask.set((start_byte + i) % MAX_MEMORY_ACCESS_SIZE);
+              if (!tx.agu_state.sparse.enabled ||
+                  tx.agu_state.request_active_bytes[i]) {
+                byte_mask.set((start_byte + i) % MAX_MEMORY_ACCESS_SIZE);
+                sector_mask.set((start_byte + i) / SECTOR_SIZE);
+              }
             }
 
             unsigned start_sector = start_byte / SECTOR_SIZE;
             unsigned end_sector = (start_byte + size - 1) / SECTOR_SIZE;
             for (unsigned i = start_sector;
                  i <= end_sector && i < SECTOR_CHUNCK_SIZE; i++) {
-              sector_mask.set(i);
+              if (!tx.agu_state.sparse.enabled) sector_mask.set(i);
             }
 
             active_mask_t active_mask;
@@ -1772,7 +1889,7 @@ public:
                 (unsigned long long)-1);
 
             m_mf_to_tx.emplace(mf->get_request_uid(), tx_uid);
-            m_mf_pending_bytes.emplace(mf->get_request_uid(), size);
+            m_mf_pending_bytes.emplace(mf->get_request_uid(), selected_bytes);
 
             unsigned long long issue_cycle = current_cycle();
             if (tma_trace_mf_enabled(issue_cycle)) {
@@ -1803,7 +1920,7 @@ public:
             m_icnt->push(mf);
             m_mf_inflight++;
             tx.m_mf_tx_inflight++;
-            record_tma_mf_issued(is_write, size);
+            record_tma_mf_issued(is_write, selected_bytes);
             if (request_bytes_per_cycle > 0)
               m_request_byte_credit -=
                   std::min<unsigned>(m_request_byte_credit, size);
@@ -2114,7 +2231,7 @@ generate_tma_requests(const tensormap_descriptor_t &tensormap,
                       const int32_t start_coords[5]) {
   std::vector<tma_request_t> requests;
 
-  if (!tensormap.is_valid() || tensormap.fields.tensorRank > 4) {
+  if (!tensormap.is_valid() || tensormap.num_dims() > 5) {
     return requests; // Empty result for invalid tensormap
   }
 
@@ -2228,7 +2345,36 @@ static void do_tma_transfer(
     const tensormap_descriptor_t &tensormap, const int32_t coords[5],
     memory_space *shared_mem, memory_space *global_mem, uint32_t smem_addr,
     ptx_thread_info *thread, const ptx_instruction *pI, bool is_load,
-    tma_reduction_op_t reduction_op = tma_reduction_op_t::NONE) {
+    tma_reduction_op_t reduction_op = tma_reduction_op_t::NONE,
+    const tma_sparse_window_t *sparse = nullptr) {
+  if (is_load && sparse && sparse->enabled) {
+    const unsigned elem = tensormap.get_element_size();
+    const unsigned bytes = tensormap.get_tile_size_bytes();
+    const auto *oob = g_oob_fill_table.get_pattern(
+        tensormap.fields.oobFill, tensormap.fields.tensorDataType);
+    for (unsigned offset = 0; offset < bytes; offset += elem) {
+      unsigned remainder = offset / elem;
+      bool in_bounds = true;
+      unsigned sparse_index = 0;
+      uint64_t address = tensormap.fields.globalAddress;
+      for (unsigned d = 0; d < tensormap.num_dims(); ++d) {
+        unsigned i = remainder % tensormap.fields.boxDim[d];
+        remainder /= tensormap.fields.boxDim[d];
+        int64_t logical = int64_t(coords[d]) + i;
+        in_bounds &= logical >= 0 && logical < tensormap.fields.globalDim[d];
+        if (d == sparse->dimension) sparse_index = i;
+        uint64_t stride = d == 0 ? elem : tensormap.fields.globalStrides[d - 1];
+        address += logical * stride;
+      }
+      uint8_t value[8] = {};
+      if (!in_bounds) memcpy(value, oob, elem);
+      else if (sparse->active[sparse_index]) global_mem->read(address, elem, value);
+      uint64_t shared_offset = apply_tma_swizzle(offset, smem_addr,
+          tensormap.fields.swizzle, tensormap.fields.boxDim[0] * elem);
+      shared_mem->write(smem_addr + shared_offset, elem, value, thread, pI);
+    }
+    return;
+  }
   // For load operations, pre-fill the entire tile in shared memory with OOB
   // fill value
   if (is_load) {
@@ -2726,10 +2872,13 @@ static void handle_tma_tensor(ptx_instruction *pI, ptx_thread_info *thread) {
     for (unsigned i = 0; i < 5; ++i)
       tma_dyn_info.coords[i] = coords[i];
     cache_tensormap_descriptor(tma_dyn_info, tensormap);
-    pI->set_tma_dyn_info(thread->get_laneid(), tma_dyn_info);
 
+    // Capture once for both functional movement and asynchronous timing.
+    tma_dyn_info.sparse = capture_sparse_window(tensormap, tensormap_addr,
+                                                coords, thread);
+    pI->set_tma_dyn_info(thread->get_laneid(), tma_dyn_info);
     do_tma_transfer(tensormap, coords, shared_mem, global_mem, dst_addr, thread,
-                    pI, true);
+                    pI, true, tma_reduction_op_t::NONE, &tma_dyn_info.sparse);
 
   } else if (dst_option == GLOBAL_OPTION && src_option == CTA_OPTION) {
     // Tensor store: global <- shared

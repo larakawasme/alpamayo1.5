@@ -68,7 +68,7 @@ uint32_t tensormap_descriptor_t::get_element_size() const {
 }
 
 uint32_t tensormap_descriptor_t::get_tile_size_bytes() const {
-  if (fields.tensorRank > 4)
+  if (num_dims() > 5)
     return 0;
 
   uint32_t total_elements = 1;
@@ -131,7 +131,9 @@ void tensormap_descriptor_t::print() const {
   append_checked("TensorMap Descriptor:\n");
   append_checked("  global_address: 0x%llx\n",
                  (unsigned long long)fields.globalAddress);
-  append_checked("  rank: %u (num_dims=%u)\n", fields.tensorRank, dims);
+  append_checked("  rank: %u (num_dims=%u, sparse_extension=%u)\n",
+                 fields.tensorRank & ~TENSORMAP_SPARSE_FLAG, dims,
+                 has_sparse_extension());
   append_checked("  elemtype: %u (size=%u bytes)\n", fields.tensorDataType,
                  get_element_size());
 
@@ -443,9 +445,14 @@ void handle_tensormap_inst(const ptx_instruction *pI, ptx_thread_info *thread) {
     memory_space *global_mem = thread->get_global_memory();
     ;
 
-    tensormap_descriptor_t desc =
-        tensormap_descriptor_t::read_from_shared(shared_mem, src_addr);
-    global_mem->write(dst_addr, size_in_bytes, desc.raw_bytes, thread, pI);
+    if (size_in_bytes != TENSORMAP_DESCRIPTOR_SIZE &&
+        size_in_bytes != sizeof(sparse_tensormap_descriptor_t)) {
+      fprintf(stderr, "TMA ERROR: descriptor copy must be 128 or 256 bytes\n");
+      abort();
+    }
+    uint8_t bytes[sizeof(sparse_tensormap_descriptor_t)];
+    shared_mem->read(src_addr, size_in_bytes, bytes);
+    global_mem->write(dst_addr, size_in_bytes, bytes, thread, pI);
 
   } else {
     GPPRINTF_INST_EXEC(

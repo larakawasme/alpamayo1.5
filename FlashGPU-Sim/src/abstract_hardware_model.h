@@ -94,6 +94,7 @@ enum FuncCache {
 
 enum AdaptiveCache { FIXED = 0, ADAPTIVE_CACHE = 1 };
 
+#include "gpgpu-sim/flash/tma_sparse.h"
 #include "parallel_sim_util.h"
 
 #ifdef __cplusplus
@@ -912,6 +913,7 @@ public:
     int32_t coords[5] = {0, 0, 0, 0, 0};
     uint8_t tensormap_descriptor[TMA_DESCRIPTOR_BYTES] = {};
     bool has_tensormap_descriptor = false;
+    tma_sparse_window_t sparse;
     bool is_valid() const {
       return mbar_addr != (uint32_t)-1 || size_in_bytes > 0;
     }
