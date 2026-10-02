@@ -8,13 +8,6 @@ supported-markers = [
     "platform_machine == 'x86_64' and sys_platform == 'linux'",
 ]
 
-[manifest]
-overrides = [
-    { name = "torch", specifier = "==2.9.1" },
-    { name = "torchvision", specifier = "==0.24.1" },
-    { name = "transformers", specifier = "==4.57.3" },
-]
-
 [[package]]
 name = "accelerate"
 version = "1.14.0"
@@ -85,28 +78,6 @@ wheels = [
 ]
 
 [[package]]
-name = "alpamayo-r1"
-version = "0.1.0"
-source = { git = "https://github.com/NVlabs/alpamayo.git#f3198c2f6158e1158ae8cb4fc7d7716bd25085bb" }
-dependencies = [
-    { name = "colorlog" },
-    { name = "einops" },
-    { name = "flash-attn" },
-    { name = "hydra-core" },
-    { name = "physical-ai-av" },
-    { name = "pillow" },
-    { name = "scipy" },
-    { name = "torch" },
-    { name = "torchvision" },
-    { name = "transformers" },
-]
-
-[[package]]
-name = "alpamayo-recipes"
-version = "0.1.0"
-source = { editable = "../../src" }
-
-[[package]]
 name = "alpamayo1-5"
 version = "0.1.0"
 source = { editable = "alpamayo1.5" }
@@ -160,10 +131,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
-    { name = "alpamayo-r1" },
-    { name = "alpamayo-recipes" },
     { name = "alpamayo1-5" },
     { name = "av" },
+    { name = "colorlog" },
     { name = "einops" },
     { name = "flash-attn" },
     { name = "hydra-colorlog" },
@@ -193,10 +163,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=1.12.0" },
-    { name = "alpamayo-r1", git = "https://github.com/NVlabs/alpamayo.git" },
-    { name = "alpamayo-recipes", editable = "../../src" },
     { name = "alpamayo1-5", editable = "alpamayo1.5" },
     { name = "av", specifier = ">=16.0.1" },
+    { name = "colorlog" },
     { name = "einops", specifier = ">=0.8.1" },
     { name = "flash-attn", url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.9cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" },
     { name = "hydra-colorlog", specifier = ">=1.2.0" },

@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import argparse
+import contextlib
 import gc
 import math
 import time
@@ -26,10 +27,10 @@ import torch
 from alpamayo1_5 import helper
 from alpamayo1_5.load_physical_aiavdataset import load_physical_aiavdataset
 from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
-from alpamayo_r1.common import logging
-from alpamayo_r1.common.logging import setup_logging
 from tqdm import tqdm
 
+from alpamayo1_5_quant import alpamayo_logging as logging
+from alpamayo1_5_quant.alpamayo_logging import setup_logging
 from alpamayo1_5_quant.utils import read_clip_ids_from_parquet
 
 setup_logging()
@@ -54,6 +55,7 @@ def compute_minade_for_clip_pytorch(
     max_generation_length: int,
     device: str = "cuda",
     seed: int | None = 42,
+    profile: bool = False,
 ) -> tuple[float, float]:
     """
     Returns minADE (meters) for one clip.
@@ -90,8 +92,18 @@ def compute_minade_for_clip_pytorch(
     # yield the memory bus to GPU before starting inference — critical on unified memory (GB10)
     torch.cuda.synchronize()
 
+    # with --profile, only the inference call below is captured by nsys
+    # (requires `nsys profile --capture-range=cudaProfilerApi`)
+    if profile:
+        torch.cuda.profiler.start()
+        profile_ctx = contextlib.ExitStack()
+        profile_ctx.enter_context(torch.cuda.nvtx.range(f"inference {clip_id}"))
+        profile_ctx.enter_context(torch.autograd.profiler.emit_nvtx())
+    else:
+        profile_ctx = contextlib.nullcontext()
+
     start = time.perf_counter()
-    with torch.autocast("cuda", dtype=torch.float16):
+    with profile_ctx, torch.autocast("cuda", dtype=torch.float16):
         pred_xyz, pred_rot = model.sample_trajectories_from_data_with_vlm_rollout(
             data=model_inputs,
             top_p=top_p,
@@ -99,6 +111,9 @@ def compute_minade_for_clip_pytorch(
             num_traj_samples=num_traj_samples,
             max_generation_length=max_generation_length,
         )
+    if profile:
+        torch.cuda.synchronize()
+        torch.cuda.profiler.stop()
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     del model_inputs
 
@@ -134,6 +149,12 @@ def main():
         type=int,
         default=1,
         help="Call torch.cuda.empty_cache() every N clips (0 disables).",
+    )
+    ap.add_argument(
+        "--profile",
+        action="store_true",
+        help="Limit nsys capture to inference steps; run under "
+        "`nsys profile --capture-range=cudaProfilerApi --capture-range-end=repeat`.",
     )
     args = ap.parse_args()
 
@@ -179,6 +200,7 @@ def main():
                 max_generation_length=args.max_generation_length,
                 device=device,
                 seed=seed,
+                profile=args.profile,
             )
             per_clip.append(minade)
             per_clip_ms.append(elapsed_ms)

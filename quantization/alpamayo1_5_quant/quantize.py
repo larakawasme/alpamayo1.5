@@ -27,10 +27,10 @@ from alpamayo1_5 import helper
 from alpamayo1_5.load_physical_aiavdataset import load_physical_aiavdataset
 from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
 from alpamayo1_5.models.token_utils import to_special_token
-from alpamayo_r1.common import logging
-from alpamayo_r1.common.logging import setup_logging
 from tqdm import tqdm
 
+from alpamayo1_5_quant import alpamayo_logging as logging
+from alpamayo1_5_quant.alpamayo_logging import setup_logging
 from alpamayo1_5_quant.utils import build_colocated_device_map, read_clip_ids_from_parquet
 
 setup_logging()
